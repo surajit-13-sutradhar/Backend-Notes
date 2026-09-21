@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Databases &amp; PostgreSQL — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="api-design.html">←Rest API Design</a>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>Databases &amp; PostgreSQL — Interview Notes</h1>
+
+<h2>1. Why Databases? Persistence</h2>
+
+<p>Interacting with databases is one of the most frequent things a backend engineer does. At its core, a database is a way to <strong>persist</strong> information.</p>
+
+<blockquote>
+<strong>Persistence</strong> = storing data so that it survives after the program that created it has stopped — across sessions, restarts, and time.
+</blockquote>
+
+<p>Example: a to-do app. You add and check off tasks, close the app, reopen it later, and everything is still in the state you left it. Without persistence, every launch would start from scratch.</p>
+
+<h3>What counts as a "database"?</h3>
+<ul>
+  <li>In the broadest sense, <strong>any structured storage</strong> offering create / read / update / delete (CRUD): a phone's contact list, the browser's <code>localStorage</code> / session storage / cookies (key–value stores), even a text file of notes.</li>
+  <li>In a <strong>backend context</strong>, "database" means a <strong>disk-based database</strong> (HDD/SSD) such as PostgreSQL, MySQL or MongoDB.</li>
+</ul>
+
+<h3>Why disk and not RAM?</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    CPU["CPU"] --> RAM["RAM (primary memory)<br/>very fast, small, costly<br/>Used by caches: Redis, in-memory caches"]
+    CPU --> DISK["Disk (secondary memory): HDD or SSD<br/>slower, large, cheap<br/>Used by databases: PostgreSQL, MongoDB"]
+</pre>
+
+<div class="table-wrap">
+<table>
+<tr><th></th><th>RAM (primary)</th><th>Disk (secondary)</th></tr>
+<tr><td><strong>Speed</strong></td><td>Very fast</td><td>Relatively slow</td></tr>
+<tr><td><strong>Cost / capacity</strong></td><td>Costly, typically 8–128 GB on consumer machines</td><td>Cheap, typically 512 GB – 2 TB+</td></tr>
+<tr><td><strong>Typical use</strong></td><td>Caching (Redis, in-memory caches)</td><td>Traditional relational and non-relational databases</td></tr>
+</table>
+</div>
+
+<p>For databases, <strong>capacity matters most</strong> and a speed trade-off is acceptable, so they live on disk. For a backend engineer, this is the level of detail that matters; storage engine internals are a much deeper topic.</p>
+
+<h2>2. DBMS — Database Management System</h2>
+
+<p>Just dumping data on disk isn't enough. You also need efficient ways to create, read, update, and delete it across hundreds or thousands of GBs. That is the job of a <strong>DBMS</strong> (e.g., PostgreSQL, MySQL, MongoDB).</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    DBMS["DBMS"] --> A["Data organization<br/>store data efficiently"]
+    DBMS --> B["Access<br/>efficient CRUD operations"]
+    DBMS --> C["Integrity<br/>data is accurate, valid, consistent"]
+    DBMS --> D["Security<br/>protect from unauthorized access: users and roles"]
+</pre>
+
+<ul>
+  <li><strong>Integrity example:</strong> an e-commerce <code>payment</code> column is numeric. The DBMS rejects an attempt to insert a string like <code>"something"</code> into it.</li>
+</ul>
+
+<h3>Why not just use text files?</h3>
+<ol>
+  <li><strong>Parsing</strong> — to find a record you must write application code to read the file, split lines, and compare fields. This is slow (especially in slower languages like JavaScript, Python, Ruby) and error-prone; a bug can corrupt data.</li>
+  <li><strong>No structure</strong> — a text file accepts anything, so you can't enforce "this field is always a number". No consistency guarantees.</li>
+  <li><strong>Concurrency</strong> — two users updating the same value at the same time causes lost updates.</li>
+</ol>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant A as User A adds 20
+    participant B as User B subtracts 20
+    participant F as Text file, amount is 40
+    A->>F: read 40
+    B->>F: read 40
+    A->>F: write 60
+    B->>F: write 20
+    Note over F: Last write wins. Final value is 20 and A's update is lost
+</pre>
+
+<p>Depending on timing, the file could end up as 60 or 20 — there's no consistency. A DBMS has concurrency mechanisms to manage this correctly.</p>
+
+<h2>3. Relational vs Non-Relational Databases</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Relational (SQL)</th><th>Non-relational (NoSQL)</th></tr>
+<tr><td><strong>Examples</strong></td><td>PostgreSQL, MySQL, SQL Server</td><td>MongoDB</td></tr>
+<tr><td><strong>Organization</strong></td><td>Tables, rows, columns; relationships via foreign keys</td><td>Collections of documents</td></tr>
+<tr><td><strong>Schema</strong></td><td><strong>Predefined and strict</strong> — every column and type decided up front</td><td><strong>Flexible</strong> — documents in the same collection can have different structures</td></tr>
+<tr><td><strong>Query language</strong></td><td>SQL (Structured Query Language)</td><td>Database-specific</td></tr>
+<tr><td><strong>Strength</strong></td><td>Strong data integrity; complex queries and relationships</td><td>Fast prototyping; storing unpredictable content</td></tr>
+<tr><td><strong>Weakness</strong></td><td>Schema changes require migrations</td><td>Integrity is not enforced by the database — it moves into application code, which is more complex and error-prone</td></tr>
+</table>
+</div>
+
+<p>Terminology mapping: table ↔ collection, row ↔ document.</p>
+
+<ul>
+  <li><strong>Good fit for relational: CRM</strong> (customer relationship management) — needs accurate, consistent data about contacts and sales opportunities, plus complex queries across relationships.</li>
+  <li><strong>Good fit for non-relational: CMS</strong> (content management system) — articles can contain images, code blocks, embeds, and other unpredictable content types.</li>
+</ul>
+
+<h2>4. Why PostgreSQL?</h2>
+
+<ol>
+  <li><strong>Open source and free</strong> — companies can self-host it.</li>
+  <li><strong>Sticks to the SQL standard</strong> — standard SQL runs the same on other systems, so migrating to MySQL or SQL Server later needs only minor changes.</li>
+  <li><strong>Extensible</strong> — a huge feature set (documentation is ~1,400 pages) and an extension system.</li>
+  <li><strong>Reliable and scalable.</strong></li>
+  <li><strong>Excellent JSON support</strong> — native <code>JSON</code> / <code>JSONB</code> types with good indexing and query capabilities, so you rarely need a NoSQL database just for dynamic data.</li>
+</ol>
+
+<blockquote>
+Until you serve millions of users and need to optimize a specific bottleneck, the MySQL vs PostgreSQL performance debate doesn't matter. PostgreSQL is a strong default for most projects.
+</blockquote>
+
+<p><strong>Note:</strong> SQL is the <em>language</em>; PostgreSQL is the <em>database system</em> that executes it. Basic SQL and Postgres (<code>CREATE TABLE</code>, <code>SELECT</code>, <code>ORDER BY</code>, <code>GROUP BY</code>, ...) are prerequisites; this chapter covers only what's most relevant to backend work. The demo uses <strong>TablePlus</strong> as the GUI client.</p>
+
+<h2>5. PostgreSQL Data Types</h2>
+
+<h3>Numbers</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Type</th><th>Notes</th></tr>
+<tr><td><code>SERIAL</code> / <code>BIGSERIAL</code></td><td>Auto-incrementing integer (1, 2, 3, ...). <code>BIGSERIAL</code> has a much larger max; prefer it for production primary keys.</td></tr>
+<tr><td><code>SMALLINT</code> &lt; <code>INTEGER</code> &lt; <code>BIGINT</code></td><td>Integers of increasing capacity — choose by the range you need.</td></tr>
+<tr><td><code>DECIMAL(p, s)</code> / <code>NUMERIC(p, s)</code></td><td>Exact numbers (treated identically). <code>NUMERIC(10, 2)</code> = at most 10 digits in total, exactly 2 after the decimal point (e.g., <code>12345678.90</code>).</td></tr>
+<tr><td><code>REAL</code>, <code>DOUBLE PRECISION</code>, <code>FLOAT</code></td><td>Floating-point: faster to store and compute, but <strong>not exact</strong>.</td></tr>
+</table>
+</div>
+
+<blockquote>
+<strong>Rule of thumb:</strong> if accuracy matters (e.g., <code>price</code>, money) use <code>DECIMAL</code>/<code>NUMERIC</code>. If tiny discrepancies are harmless (e.g., an area or a scientific measurement) and speed matters, floating-point is fine.
+</blockquote>
+
+<h3>Strings</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Type</th><th>Behavior</th></tr>
+<tr><td><code>CHAR(n)</code></td><td>Fixed length; shorter values are <strong>padded with spaces</strong> to <code>n</code>.</td></tr>
+<tr><td><code>VARCHAR(n)</code></td><td>Variable length up to a maximum of <code>n</code>; longer values cause a database error.</td></tr>
+<tr><td><code>TEXT</code></td><td>Variable length with no declared limit (a very large upper bound).</td></tr>
+</table>
+</div>
+
+<ul>
+  <li><code>CHAR</code>: only when every value is guaranteed to be the same length (e.g., two-letter day codes such as <code>Mo</code>, <code>Tu</code>). Otherwise avoid it.</li>
+  <li><strong><code>TEXT</code> vs <code>VARCHAR(n)</code>:</strong> the Postgres docs recommend <code>TEXT</code>, and there is no meaningful performance difference in Postgres. Many "<code>VARCHAR(255)</code>" habits come from MySQL and mean nothing in Postgres.</li>
+  <li><strong>Why <code>TEXT</code> is preferred:</strong> changing a limit later needs a risky migration. An arbitrary number like 255 also misleads new team members into thinking it has meaning. Enforce length limits in <strong>application code</strong> instead.</li>
+</ul>
+
+<h3>Other types</h3>
+<ul>
+  <li><code>BOOLEAN</code> — true/false.</li>
+  <li><code>DATE</code>, <code>TIME</code>, <code>TIMESTAMP</code>, <code>TIMESTAMPTZ</code> (<code>TIMESTAMP WITH TIME ZONE</code> — stores the time zone information too), <code>INTERVAL</code> (e.g., "10 days", "1 week").</li>
+  <li><code>UUID</code> — a popular primary key choice (unique, non-guessable); Postgres has a native type.</li>
+  <li><code>JSON</code> vs <code>JSONB</code> — <code>JSON</code> is stored as plain text. <code>JSONB</code> is stored in a Postgres-specific binary format for faster processing and querying. It is Postgres-specific (not part of the SQL standard); use <strong><code>JSONB</code> in most cases</strong>.</li>
+  <li><strong>Arrays</strong> of any type (e.g., <code>INTEGER[]</code>).</li>
+  <li>Special types: network addresses, MAC addresses, geometric points, XML — rarely needed day to day.</li>
+</ul>
+
+<h2>6. Migrations</h2>
+
+<p>In production you don't just open a GUI and run ad-hoc SQL. There'd be no record of <em>what</em> changed, <em>who</em> changed it, or <em>when</em>, and no way to control the database's version.</p>
+
+<blockquote>
+<strong>Database migrations</strong> = versioned SQL files, kept in your repo (e.g., <code>db/migrations/</code>) and applied in order by a command-line tool (dbmate, golang-migrate, etc.).
+</blockquote>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    F["db/migrations/<br/>001_create_users.sql<br/>002_seed_data.sql<br/>003_indexes_triggers.sql"] --> T["Migration tool (dbmate)<br/>reads DATABASE_URL from .env<br/>runs files in sequence"]
+    T --> DB[("PostgreSQL")]
+    T <--> S["schema_migrations table<br/>stores the current version"]
+</pre>
+
+<ul>
+  <li><strong>File naming:</strong> sequential numbers or timestamps so the order is unambiguous (timestamps are common).</li>
+  <li><strong>Up migration</strong> — the change to apply (create tables, types, indexes, ...).</li>
+  <li><strong>Down migration</strong> — the exact reverse, used to <strong>roll back</strong> if something breaks. (Some modern workflows skip down migrations, but they are the standard approach.) In dbmate both live in the same file, separated by <code>-- migrate:up</code> and <code>-- migrate:down</code> comments.</li>
+  <li>The tool creates a table (<code>schema_migrations</code>) with a <code>version</code> column, recording what's already applied. On the next run it applies only the newer files; re-running old statements would fail with "table already exists".</li>
+</ul>
+
+<p><strong>Why migrations:</strong> (1) track database changes over time in version control; (2) roll back; (3) reproducible schema across environments. Relational databases have a strict schema, so <em>every</em> change (add a table, alter a column, create an index or trigger) goes through a new migration.</p>
+
+<pre><code>dbmate new create_users_table   # creates db/migrations/&lt;timestamp&gt;_create_users_table.sql
+dbmate up                       # applies all pending migrations
+dbmate down                     # rolls back the latest migration</code></pre>
+
+<h3>Seeding</h3>
+<p><strong>Seeding</strong> = inserting test data so you can exercise your queries and APIs in development. Best practice: put it in a <strong>separate migration file</strong> (e.g., <code>dbmate new seed_data</code>) that sorts after the schema migration. The seed uses CTEs (common table expressions) — e.g., insert users, <code>RETURNING id, email</code>, then insert profiles from that intermediate result.</p>
+
+<h2>7. Data Modeling: Project Management Platform</h2>
+
+<p>The same domain as the API design chapter. Tables: <code>users</code>, <code>user_profiles</code>, <code>projects</code>, <code>tasks</code>, <code>project_members</code>, with three enum types.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+erDiagram
+    USERS ||--o| USER_PROFILES : "has one profile"
+    USERS ||--o{ PROJECTS : "owns"
+    PROJECTS ||--o{ TASKS : "contains"
+    USERS |o--o{ TASKS : "assigned to"
+    PROJECTS ||--o{ PROJECT_MEMBERS : "has members"
+    USERS ||--o{ PROJECT_MEMBERS : "joins projects"
+    USERS {
+        uuid id PK
+        text email UK
+        text full_name
+        text password_hash
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    USER_PROFILES {
+        uuid user_id PK, FK
+        text avatar_url
+        text bio
+        text phone
+    }
+    PROJECTS {
+        uuid id PK
+        text name
+        text description
+        project_status status
+        uuid owner_id FK
+    }
+    TASKS {
+        uuid id PK
+        uuid project_id FK
+        text title
+        int priority
+        task_status status
+        date due_date
+        uuid assigned_to FK
+    }
+    PROJECT_MEMBERS {
+        uuid project_id PK, FK
+        uuid user_id PK, FK
+        member_role role
+    }
+</pre>
+
+<p>Every table also has <code>created_at</code> and <code>updated_at</code> (only shown on <code>users</code> above to keep the diagram readable).</p>
+
+<h3>Constraints — the tools of data integrity</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Constraint</th><th>What it enforces</th></tr>
+<tr><td><code>PRIMARY KEY</code></td><td>Uniquely identifies a row. <strong>Implicitly <code>NOT NULL</code> + <code>UNIQUE</code></strong>, and automatically indexed.</td></tr>
+<tr><td><code>NOT NULL</code></td><td>The column can't be empty. Columns allow NULL by default, so state it explicitly; the majority of your columns should be <code>NOT NULL</code> (buggy scripts can otherwise fill tables with NULLs).</td></tr>
+<tr><td><code>UNIQUE</code></td><td>No two rows can share the value (e.g., <code>users.email</code>).</td></tr>
+<tr><td><code>CHECK (...)</code></td><td>A custom condition, e.g., <code>priority BETWEEN 1 AND 5</code>.</td></tr>
+<tr><td><code>DEFAULT ...</code></td><td>Value used if none is supplied (e.g., <code>gen_random_uuid()</code>, <code>NOW()</code>, <code>'active'</code>).</td></tr>
+<tr><td><code>REFERENCES</code> (foreign key)</td><td>The value must exist in the referenced table's key. Prevents orphan rows and invalid IDs.</td></tr>
+</table>
+</div>
+
+<h3>Enum types</h3>
+<pre><code>CREATE TYPE project_status AS ENUM ('active', 'completed', 'archived');
+CREATE TYPE task_status    AS ENUM ('pending', 'in_progress', 'completed', 'cancelled');
+CREATE TYPE member_role    AS ENUM ('owner', 'admin', 'member');</code></pre>
+
+<ul>
+  <li><strong>Data integrity</strong> — inserting any value outside the set is a database-level error, not just an application-level check.</li>
+  <li><strong>Documentation</strong> (arguably the bigger win) — anyone reading the migrations sees the allowed values immediately, instead of digging through application code to find them.</li>
+  <li>Usually paired with a <code>DEFAULT</code> that is one of the enum values.</li>
+</ul>
+
+<h3>Naming conventions</h3>
+<ul>
+  <li>Table names are <strong>plural</strong> (<code>users</code>, <code>projects</code>) — the most common convention, though teams may choose singular.</li>
+  <li>Tables and columns are <strong>lowercase <code>snake_case</code></strong> (<code>full_name</code>, <code>password_hash</code>).</li>
+  <li><strong>Why not camelCase:</strong> Postgres folds unquoted identifiers to lowercase, so <code>fullName</code> becomes <code>fullname</code>. You'd need double quotes (<code>"fullName"</code>) everywhere, which makes code ugly.</li>
+  <li>The primary key column is conventionally called <code>id</code>.</li>
+</ul>
+
+<h3>Migration: tables (up), reconstructed from the walkthrough</h3>
+<pre><code>-- migrate:up
+CREATE TABLE users (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         TEXT NOT NULL UNIQUE,
+  full_name     TEXT NOT NULL,
+  password_hash TEXT NOT NULL,   -- never store the plain-text password
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- one-to-one with users: the FK is also the PK
+CREATE TABLE user_profiles (
+  user_id    UUID PRIMARY KEY REFERENCES users,
+  avatar_url TEXT,               -- optional fields: no NOT NULL
+  bio        TEXT,
+  phone      TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE projects (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,
+  description TEXT,
+  status      project_status NOT NULL DEFAULT 'active',
+  owner_id    UUID NOT NULL REFERENCES users ON DELETE RESTRICT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE tasks (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id  UUID NOT NULL REFERENCES projects ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  description TEXT,
+  priority    INTEGER NOT NULL DEFAULT 1 CHECK (priority BETWEEN 1 AND 5),
+  status      task_status NOT NULL DEFAULT 'pending',
+  due_date    DATE,
+  assigned_to UUID REFERENCES users ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- linking table for many-to-many between projects and users
+CREATE TABLE project_members (
+  project_id UUID NOT NULL REFERENCES projects ON DELETE CASCADE,
+  user_id    UUID NOT NULL REFERENCES users ON DELETE CASCADE,
+  role       member_role NOT NULL DEFAULT 'member',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (project_id, user_id)   -- composite primary key
+);
+
+-- migrate:down
+DROP TABLE project_members;
+DROP TABLE tasks;
+DROP TABLE projects;
+DROP TABLE user_profiles;
+DROP TABLE users;
+DROP TYPE member_role;
+DROP TYPE task_status;
+DROP TYPE project_status;</code></pre>
+
+<p>Note the <strong>down</strong> migration drops things in the <strong>reverse order</strong> of creation (tables before the types and referenced tables they depend on).</p>
+
+<h3>Relationship types and how to implement each</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Relationship</th><th>Example</th><th>Implementation</th></tr>
+<tr><td><strong>One-to-one</strong></td><td><code>users</code> ↔ <code>user_profiles</code></td><td>The second table's <strong>primary key is also a foreign key</strong> to the first table (<code>user_id UUID PRIMARY KEY REFERENCES users</code>). No separate <code>id</code>.</td></tr>
+<tr><td><strong>One-to-many</strong></td><td>one <code>project</code> → many <code>tasks</code></td><td>The "many" side has a <strong>foreign key column</strong> (<code>tasks.project_id</code>) that is <em>not</em> its primary key.</td></tr>
+<tr><td><strong>Many-to-many</strong></td><td><code>users</code> ↔ <code>projects</code></td><td>A <strong>linking (junction) table</strong> with foreign keys to both, and a <strong>composite primary key</strong> of the two (<code>PRIMARY KEY (project_id, user_id)</code>). Data specific to the relationship (e.g., <code>role</code>) lives here.</td></tr>
+</table>
+</div>
+
+<p><strong>Why a separate <code>user_profiles</code> table?</strong> Profile data (bio, phone, social links, website, ...) keeps growing. Keeping it in its own table means you don't keep altering the core <code>users</code> table. The same pattern is used for preferences and metadata.</p>
+
+<h3>Referential integrity: <code>ON DELETE</code> behavior</h3>
+<p>The foreign key's <code>ON DELETE</code> clause defines what happens to child rows when the referenced (parent) row is deleted.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Action</th><th>Effect</th><th>Used here</th></tr>
+<tr><td><code>RESTRICT</code></td><td>Block the delete if child rows exist</td><td><code>projects.owner_id</code> — can't delete a user who still owns projects</td></tr>
+<tr><td><code>CASCADE</code></td><td>Delete the child rows too</td><td><code>tasks.project_id</code> (deleting a project deletes its tasks); both foreign keys of <code>project_members</code></td></tr>
+<tr><td><code>SET NULL</code></td><td>Set the child's FK column to <code>NULL</code> (fails if the column is <code>NOT NULL</code>)</td><td><code>tasks.assigned_to</code> — deleting a user just unassigns their tasks</td></tr>
+<tr><td><code>SET DEFAULT</code></td><td>Set the child's FK column to its default value</td><td>—</td></tr>
+</table>
+</div>
+
+<h2>8. From API to SQL</h2>
+
+<p>The flow for a request like <code>GET /v1/users/:userId</code>:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    FE["Front end"] -- "GET /v1/users/:userId" --> H["Handler"]
+    H --> S["Service"]
+    S --> R["Repository"]
+    R -- "parameterized SQL" --> DB[("PostgreSQL")]
+    DB -- "rows" --> R
+    R -. "result, serialized to JSON in the response" .-> FE
+</pre>
+
+<h3>Parameterized queries (prevent SQL injection)</h3>
+<p>A <strong>parameterized query</strong> puts an empty <em>slot</em> in the SQL and supplies the value separately. Whatever is passed is treated purely as <strong>data</strong> (escaped), never as SQL. This is the defense against <strong>SQL injection</strong>, which is what happens when you build queries by concatenating strings.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant App as Application (driver or ORM)
+    participant DB as PostgreSQL
+    App->>DB: Query text with a slot, WHERE id = $1
+    App->>DB: Value sent separately, treated as data only
+    Note over DB: Even a value like delete from users is just a string
+    DB-->>App: Matching rows
+</pre>
+
+<p>In TablePlus the demo uses named slots (<code>:user_id</code>); real Postgres drivers typically use positional placeholders (<code>$1</code>, <code>$2</code>, ...). In application code, your driver or ORM handles the binding.</p>
+
+<h3>GET all users, with each user's profile embedded</h3>
+<pre><code>SELECT u.*, to_jsonb(up.*) AS profile
+FROM users u
+LEFT JOIN user_profiles up ON u.id = up.user_id
+ORDER BY u.created_at DESC;</code></pre>
+
+<ul>
+  <li>Write <code>FROM</code> first (mentally) so you know where the data comes from; use short <strong>aliases</strong> (<code>u</code>, <code>up</code>).</li>
+  <li><strong><code>LEFT JOIN</code> vs <code>INNER JOIN</code>:</strong> some users may have no profile row. <code>INNER JOIN</code> would drop those users; <code>LEFT JOIN</code> keeps every user and returns a <code>NULL</code> profile. These are the two joins you'll use most.</li>
+  <li><code>to_jsonb(up.*)</code> converts the profile row into a JSON object, embedded as the <code>profile</code> field, so one API call returns the user and profile together.</li>
+  <li><strong>Always <code>ORDER BY</code> list queries.</strong> Without it, row order isn't guaranteed. The default is <code>created_at DESC</code> (latest first).</li>
+</ul>
+
+<h3>GET a single user</h3>
+<pre><code>SELECT u.*, to_jsonb(up.*) AS profile
+FROM users u
+LEFT JOIN user_profiles up ON u.id = up.user_id
+WHERE u.id = :user_id;</code></pre>
+
+<h3>Dynamic filtering, sorting and pagination</h3>
+<p>List APIs must support optional filters, sorting, and pagination (as in the API design chapter). In a real backend you <strong>build the query dynamically</strong>: only add a <code>WHERE</code> condition if the client sent that parameter, and apply defaults for the rest.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    P["Query params: page, limit, letter, sortBy, sortOrder"] --> D["Apply defaults<br/>page=1, limit=10, sortBy=created_at, sortOrder=desc"]
+    D --> W{"letter passed?"}
+    W -- Yes --> W1["Add name-prefix filter (ILIKE)"]
+    W -- No --> O
+    W1 --> O["Add ORDER BY using an allow-list of sortable fields"]
+    O --> PG["Add LIMIT and OFFSET from page and limit"]
+    PG --> E["Execute with bound parameters"]
+</pre>
+
+<pre><code>SELECT u.*, to_jsonb(up.*) AS profile
+FROM users u
+LEFT JOIN user_profiles up ON u.id = up.user_id
+WHERE u.full_name ILIKE :letter || '%'   -- names starting with the letter (case-insensitive)
+ORDER BY u.email ASC                     -- sort field and direction chosen by the app
+LIMIT :limit OFFSET :offset;             -- offset = (page - 1) * limit</code></pre>
+
+<ul>
+  <li><code>ILIKE</code> is a case-insensitive <code>LIKE</code>; <code>'J' || '%'</code> matches names starting with J.</li>
+  <li><strong>Pagination:</strong> the API's <code>page</code> starts at 1, but the SQL <code>OFFSET</code> starts at 0 — convert with <code>(page - 1) * limit</code>.</li>
+  <li><strong>Important:</strong> values (letter, limit, offset, IDs) can be bound as parameters. <strong>Column names and <code>ASC</code>/<code>DESC</code> cannot</strong> in real drivers, so map the client's <code>sortBy</code> to an <strong>allow-list</strong> (e.g., <code>full_name</code>, <code>email</code>, <code>created_at</code>) and build that part in application code. Never insert raw client text there.</li>
+</ul>
+
+<h3>POST — create a user</h3>
+<pre><code>INSERT INTO users (email, full_name, password_hash)
+VALUES (:email, :full_name, :password_hash)
+RETURNING *;</code></pre>
+<p><code>RETURNING *</code> gives back the created row (with the generated <code>id</code> and timestamps), which becomes the API's <code>201</code> response body.</p>
+
+<h3>PATCH — partial update of a profile</h3>
+<p>Build the <code>SET</code> clause dynamically from only the fields the client sent (from an allowed set); untouched fields are left alone.</p>
+<pre><code>UPDATE user_profiles
+SET bio = :bio, phone = :phone      -- only fields present in the payload
+WHERE user_id = :user_id
+RETURNING *;</code></pre>
+
+<h2>9. Triggers — Auto-updating <code>updated_at</code></h2>
+
+<p>Every update should refresh the row's <code>updated_at</code>. You could set it manually in every <code>UPDATE</code> from application code, or let the database do it with a <strong>trigger</strong>: an action that runs automatically when a condition (such as an update on a table) occurs.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    U["UPDATE on a row"] --> T["BEFORE UPDATE trigger fires"]
+    T --> F["set_updated_at() sets updated_at to NOW()"]
+    F --> W["Row is written with the fresh updated_at"]
+</pre>
+
+<pre><code>CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- one trigger per table (users, user_profiles, projects, tasks, ...)
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();</code></pre>
+
+<ul>
+  <li>Name triggers clearly so the <strong>down migration</strong> can drop them (also drop the function and the indexes).</li>
+  <li>Demo result: after running the update query again, <code>updated_at</code> showed the current timestamp automatically.</li>
+</ul>
+
+<h2>10. Indexes</h2>
+
+<p>An <strong>index</strong> is like the index of a book: a lookup structure that lets the database jump straight to the data instead of scanning everything.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    Q["Query: WHERE id = X"] --> C{"Index on this column?"}
+    C -- No --> S["Sequential scan<br/>check every row, stored in different places on disk"]
+    C -- Yes --> I["Look up X in the index<br/>stored compactly in one place"]
+    I --> L["Read the row's disk location"]
+    L --> J["Jump straight to that row"]
+    S --> R["Return the row"]
+    J --> R
+</pre>
+
+<ul>
+  <li><strong>Without an index:</strong> a <strong>sequential scan</strong> — the database checks rows one by one across the disk. Fine for 6 rows, painful for millions or billions.</li>
+  <li><strong>With an index:</strong> a lookup table of (column value → row location), kept in order and stored compactly. (Internals like B-trees are a separate topic.)</li>
+  <li><strong>Order matters:</strong> an index can be ascending or descending. An index on <code>created_at DESC</code> serves a "latest first" query without re-sorting.</li>
+  <li><strong>Primary keys are indexed automatically</strong> (and so are <code>UNIQUE</code> columns), but <strong>foreign key columns are not</strong>.</li>
+</ul>
+
+<h3>When to create an index</h3>
+<p>Consider indexing a column used in a <strong>join condition</strong>, a <strong><code>WHERE</code> clause</strong>, or an <strong><code>ORDER BY</code></strong> — especially if the query runs frequently.</p>
+
+<h3>Trade-off</h3>
+<p>Indexes must be kept up to date. Every <code>INSERT</code> and <code>UPDATE</code> also updates the index, which adds write overhead. Weigh how often the query runs and the user experience you need. Start with the obvious ones, monitor performance, and drop indexes for queries that turn out to be rare.</p>
+
+<h3>Indexes used in the demo</h3>
+<pre><code>-- migrate:up
+CREATE INDEX idx_users_email              ON users (email);
+CREATE INDEX idx_users_created_at         ON users (created_at DESC);          -- "get all users", latest first
+CREATE INDEX idx_tasks_project_id         ON tasks (project_id);               -- FK used to join/fetch a project's tasks
+CREATE INDEX idx_tasks_assigned_to        ON tasks (assigned_to);              -- FK used to fetch a user's tasks
+CREATE INDEX idx_tasks_created_at         ON tasks (created_at DESC);          -- default sort of the tasks list
+CREATE INDEX idx_tasks_status             ON tasks (status);                   -- filter tasks by status
+CREATE INDEX idx_project_members_project  ON project_members (project_id);
+CREATE INDEX idx_project_members_user     ON project_members (user_id);</code></pre>
+
+<p><strong>Side note:</strong> <code>users.email</code> is already declared <code>UNIQUE</code>, and Postgres automatically creates an index to enforce uniqueness, so a separate index on it would be redundant. Check for that before adding one.</p>
+
+<p>The same migration file also contains the <code>set_updated_at()</code> function and one trigger per table. The <strong>down</strong> section drops the triggers, the function, and the indexes.</p>
+
+<h2>11. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>Persistence</strong> = data outlives the process. Backend "databases" are <strong>disk-based</strong> (large capacity, cheap, slower); <strong>caches</strong> like Redis live in <strong>RAM</strong> (fast, small, costly).</li>
+  <li>A <strong>DBMS</strong> provides organization, efficient CRUD access, <strong>integrity</strong>, and security. Plain text files fail on parsing cost, structure, and <strong>concurrency</strong> (lost updates).</li>
+  <li><strong>Relational</strong> = tables, strict predefined schema, SQL, strong integrity (CRM-style data). <strong>Non-relational</strong> = flexible documents, integrity pushed to application code (CMS-style content).</li>
+  <li><strong>PostgreSQL</strong> is a strong default: open source, SQL-standard, extensible, reliable, with excellent <code>JSONB</code> support.</li>
+  <li>Data types: <code>BIGSERIAL</code>/<code>UUID</code> for IDs; <strong><code>DECIMAL/NUMERIC</code> for money</strong> and floats for tolerant, fast calculations; prefer <strong><code>TEXT</code></strong> over <code>VARCHAR(255)</code>; use <code>TIMESTAMPTZ</code>, and <code>JSONB</code> over <code>JSON</code>.</li>
+  <li><strong>Migrations</strong> = ordered, versioned SQL files (up and down) applied by a tool that tracks the current version. Seed test data in a separate migration.</li>
+  <li><strong>Constraints</strong> (<code>PRIMARY KEY</code>, <code>NOT NULL</code>, <code>UNIQUE</code>, <code>CHECK</code>, <code>DEFAULT</code>, foreign keys) and <strong>enums</strong> protect integrity at the database level, and enums also document allowed values.</li>
+  <li><strong>Relationships:</strong> one-to-one (PK is also FK), one-to-many (FK on the "many" side), many-to-many (linking table with a composite PK).</li>
+  <li><strong>Referential integrity:</strong> <code>ON DELETE RESTRICT / CASCADE / SET NULL / SET DEFAULT</code>.</li>
+  <li><strong>Use <code>LEFT JOIN</code></strong> when the related row may not exist; <code>INNER JOIN</code> when both must match. Always <code>ORDER BY</code> list queries and paginate them.</li>
+  <li><strong>Parameterized queries</strong> defend against <strong>SQL injection</strong>. Bind values as parameters; allow-list anything structural such as sort columns.</li>
+  <li><strong>Triggers</strong> can automate work like refreshing <code>updated_at</code>.</li>
+  <li><strong>Indexes</strong> speed up joins, filters, and sorts by avoiding sequential scans, at the cost of write overhead. Primary keys are indexed automatically; foreign keys are not.</li>
+  <li>Naming: plural, lowercase <code>snake_case</code> tables and columns (Postgres folds unquoted identifiers to lowercase).</li>
+</ul>
+
+<h2>12. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What is persistence? Why do databases store data on disk while caches use RAM?</li>
+  <li>What does a DBMS do? Why not just store data in text files?</li>
+  <li>Explain a lost-update / concurrency problem and how a database helps prevent it.</li>
+  <li>Relational vs non-relational databases — how would you choose for a CRM vs a CMS?</li>
+  <li>Why choose PostgreSQL? How does it handle dynamic/JSON data?</li>
+  <li><code>DECIMAL</code> vs <code>FLOAT</code> — which for prices, and why?</li>
+  <li><code>CHAR</code> vs <code>VARCHAR</code> vs <code>TEXT</code> — which would you use, and why is <code>VARCHAR(255)</code> a questionable habit in Postgres?</li>
+  <li>What is <code>JSONB</code> and how does it differ from <code>JSON</code>?</li>
+  <li>What are database migrations? Why use them, and what are up and down migrations for?</li>
+  <li>What is seeding, and why keep it in a separate migration?</li>
+  <li>What does <code>PRIMARY KEY</code> imply? What other constraints do you know?</li>
+  <li>Why use enum types instead of plain text columns?</li>
+  <li>How do you model one-to-one, one-to-many, and many-to-many relationships?</li>
+  <li>Explain <code>ON DELETE RESTRICT</code>, <code>CASCADE</code>, and <code>SET NULL</code> with examples.</li>
+  <li><code>LEFT JOIN</code> vs <code>INNER JOIN</code> — when would you use each?</li>
+  <li>What is a parameterized query and how does it prevent SQL injection? Can you parameterize a column name?</li>
+  <li>How would you implement filtering, sorting, and pagination in a list query? Why must a list query have an <code>ORDER BY</code>?</li>
+  <li>What is an index? When should you create one, and what are the costs?</li>
+  <li>Which columns are indexed automatically, and which usually need a manual index?</li>
+  <li>What is a database trigger? How would you keep <code>updated_at</code> current automatically?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caching — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="databases.html">Databases</a>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>Caching — Interview Notes</h1>
+
+<h2>1. What Is Caching?</h2>
+
+<blockquote>
+<strong>One sentence:</strong> caching is a mechanism to decrease the time and effort it takes to do some work.<br>
+<strong>Technical definition:</strong> keeping a <strong>subset</strong> of some primary data in a location that is <strong>faster and cheaper to access</strong>, chosen by how often the data is used and how likely it is to be used again soon.
+</blockquote>
+
+<ul>
+  <li>It's a subset, <strong>not</strong> a copy of everything. The fast storage is more expensive and smaller than the primary storage, so you can't cache everything.</li>
+  <li>It is a huge factor in high-performance applications, especially ones tracking latency in the tens of milliseconds or microseconds.</li>
+  <li><strong>Cache hit</strong> = the data you're looking for is in the cache. <strong>Cache miss</strong> = it isn't, so you go to the primary source.</li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    R["Request"] --> C{"In cache?"}
+    C -- "Yes: cache hit" --> H["Return cached result, fast"]
+    C -- "No: cache miss" --> S["Compute or fetch from the primary source"]
+    S --> W["Store the result in the cache"]
+    W --> H2["Return the result"]
+</pre>
+
+<h3>When caching comes into play</h3>
+<p>Two common scenarios, seen in every example below:</p>
+<ol>
+  <li>You want to avoid doing <strong>heavy computation</strong> again and again.</li>
+  <li>You want to avoid sending/fetching <strong>large amounts of data</strong> to many users repeatedly.</li>
+</ol>
+
+<h2>2. Real-World Examples</h2>
+
+<h3>Google Search</h3>
+<ul>
+  <li>Answering a query involves crawling, indexing, and ranking billions of pages, which is computationally expensive.</li>
+  <li>Queries like "what is the weather today" are searched millions of times a day. Recomputing each time would mean huge latency and server load.</li>
+  <li>Google uses a <strong>distributed in-memory caching system</strong> (cache servers spread across the world). It checks the cache first: a hit returns instantly; a miss runs the full workflow, then caches the result for the next user.</li>
+</ul>
+
+<h3>Netflix</h3>
+<ul>
+  <li>Each movie is <strong>encoded</strong> into several resolutions (1080p, 720p, 480p, ...) and the right one is served based on the device and network speed.</li>
+  <li>Serving terabytes of video to millions of users worldwide with minimal buffering is done with a <strong>CDN (content delivery network)</strong>.</li>
+  <li>Netflix's <strong>origin servers</strong> hold all the content; <strong>edge locations</strong> around the world hold a <strong>subset</strong>, placed close to users to keep latency low. Which subset to cache in each region is decided with trend analysis and ML, since caching everywhere would be far too costly.</li>
+  <li>Not just Netflix: many companies use CDNs for videos, images, and static web assets (JavaScript, HTML, CSS). Platforms like Vercel have an edge network too, serving requests from the region closest to you.</li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    O[("Origin servers<br/>all the content")]
+    O --> E1["Edge location, Asia"]
+    O --> E2["Edge location, Europe"]
+    O --> E3["Edge location, Americas"]
+    E1 --> U1["Nearby users<br/>low latency"]
+    E2 --> U2["Nearby users<br/>low latency"]
+    E3 --> U3["Nearby users<br/>low latency"]
+</pre>
+
+<h3>X (Twitter) — trending topics</h3>
+<ul>
+  <li>Detecting trends means analyzing millions of tweets in real time with heavy ML on lots of GPUs and terabytes of data. Doing that for every user opening the trending section would crash the servers.</li>
+  <li>Trends don't change every few seconds (a topic like an ongoing election stays for hours or days), so it is safe to <strong>compute every few minutes and cache the result</strong> in an in-memory key–value store (like Redis). Users then get it instantly.</li>
+  <li>(The exact algorithm and refresh interval are not public; this is the general idea.)</li>
+</ul>
+
+<h2>3. Three Levels of Caching a Backend Engineer Meets</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Level</th><th>Examples</th></tr>
+<tr><td><strong>Network</strong></td><td>CDN, DNS caching</td></tr>
+<tr><td><strong>Hardware</strong></td><td>CPU L1/L2/L3 caches, RAM (main memory)</td></tr>
+<tr><td><strong>Software</strong></td><td>Redis, Memcached, AWS ElastiCache — used through a library, but they run on top of hardware (RAM)</td></tr>
+</table>
+</div>
+
+<h2>4. Network-Level Caching</h2>
+
+<h3>CDN — Content Delivery Network</h3>
+<p>Cache content on servers <strong>geographically close to the user</strong> (edge nodes / edge servers) to minimize latency and reduce load on the origin server.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant B as Browser
+    participant D as CDN DNS
+    participant E as Edge server in the nearest PoP
+    participant O as Origin server
+    B->>D: Resolve the domain name
+    D-->>B: IP of the nearest point of presence
+    B->>E: Request the resource
+    alt Cache hit
+        E-->>B: Cached resource
+    else Cache miss
+        E->>O: Fetch the resource
+        O-->>E: Resource
+        E-->>B: Resource, cached with a TTL
+    end
+</pre>
+
+<ol>
+  <li>The user requests a resource (image, video, web page) by URL. The browser sends a <strong>DNS query</strong> to resolve the domain into an IP.</li>
+  <li>The CDN's DNS routes the request to the <strong>nearest PoP (Point of Presence)</strong> — a region containing multiple edge servers. Routing considers the user's location and network conditions (e.g., a user on a poor connection may be sent to a PoP that holds lower-quality video). A user in New York is routed to a PoP near New York.</li>
+  <li>The edge server checks its cache. <strong>Hit</strong> → serve immediately. <strong>Miss</strong> → fetch from the origin server, serve it, and cache it.</li>
+</ol>
+
+<p><strong>TTL (time to live):</strong> each cached item gets a lifetime (e.g., a few hours). After it expires, the next request fetches fresh content from the origin, which handles new versions and regional changes.</p>
+
+<h3>DNS caching</h3>
+<p>DNS resolves a domain (<code>example.com</code>) to an IP address. Doing the full lookup for every request would be a lot of work for billions of users, so DNS caches heavily at <strong>multiple layers</strong>.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant U as User device
+    participant R as Recursive resolver
+    participant Root as Root server
+    participant TLD as TLD server for .com
+    participant A as Authoritative name server
+    U->>R: What is the IP of example.com?
+    Note over R: Checks its local cache first. A hit returns immediately
+    R->>Root: Query, on a cache miss
+    Root-->>R: Referral to the .com TLD server
+    R->>TLD: Query
+    TLD-->>R: Referral to the authoritative server for example.com
+    R->>A: Query
+    A-->>R: IP address
+    Note over R: Caches the answer for next time
+    R-->>U: IP address
+</pre>
+
+<ul>
+  <li><strong>Recursive resolver</strong> — provided by your ISP (e.g., Jio, ACT, Airtel) or a public DNS provider (Google, Cloudflare). It is "recursive" because it keeps going through servers until it finds the IP.</li>
+  <li><strong>Root servers</strong> — don't know the IP, but know which servers handle each top-level domain (<code>.com</code>, <code>.in</code>, ...).</li>
+  <li><strong>TLD servers</strong> — point to the authoritative name server for the domain.</li>
+  <li><strong>Authoritative name server</strong> — holds the real answer (the IP).</li>
+</ul>
+
+<p><strong>Cache layers</strong> (a miss at one layer falls through to the next):</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Browser DNS cache"] -- miss --> B["Operating system DNS cache"]
+    B -- miss --> C["Recursive resolver cache"]
+    C -- miss --> D["Root, TLD and authoritative servers<br/>full lookup, some of which also cache"]
+</pre>
+
+<p>Operating systems (Windows, macOS, Linux), browsers (Chrome, Firefox), recursive resolvers, and even some authoritative servers keep their own DNS caches. In practice the browser's own cache is usually checked before the OS cache.</p>
+
+<h2>5. Hardware-Level Caching</h2>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    CPU["CPU"] --> L1["L1 cache"]
+    L1 --> L2["L2 cache"]
+    L2 --> L3["L3 cache<br/>shared between cores"]
+    L3 --> RAM["RAM, main memory<br/>fast, volatile, limited capacity"]
+    RAM --> DISK["Secondary storage: SSD, HDD, network storage<br/>slower, persistent, large capacity"]
+</pre>
+
+<ul>
+  <li>CPUs keep <strong>L1, L2, and L3 caches</strong> for frequently used or soon-to-be-used data. Example: traversing an array sequentially is fast partly because the CPU predicts access and pulls neighboring memory into cache.</li>
+  <li><strong>RAM (Random Access Memory)</strong> is the focus for backend work. It's "random access" because any address is reachable directly (electrically) in roughly constant time, unlike a hard disk, where a mechanical head must move.</li>
+  <li><strong>Trade-off:</strong> RAM gives up <strong>capacity</strong> and <strong>non-volatility</strong> (its data is lost when power is off) in exchange for <strong>speed</strong>. So it can't replace disk storage.</li>
+  <li><strong>Disk storage</strong> is persistent (data stays regardless of power or running programs), and cheaper with far more capacity, but slower.</li>
+</ul>
+
+<h2>6. Software-Level Caching: In-Memory Key–Value Stores</h2>
+
+<p>Technologies: <strong>Redis</strong> (and <strong>Valkey</strong>, its open-source alternative), <strong>Memcached</strong>, and the managed cloud version <strong>AWS ElastiCache</strong>.</p>
+
+<p>They're described as <strong>in-memory, key–value, NoSQL databases</strong>:</p>
+<ol>
+  <li><strong>In-memory</strong> — data lives in RAM, not on disk (unlike PostgreSQL or MySQL), so access is very fast.</li>
+  <li><strong>Key–value</strong> — a simple structure: a key maps to a value (string, number, JSON, list, ...; supported types vary by tool).</li>
+  <li><strong>NoSQL</strong> — no strict schema, tables, or rows, and no SQL joins or aggregations.</li>
+  <li>For <strong>persistence</strong>, these tools use secondary storage behind the scenes and reload data into memory on startup. But reads and writes are served from memory.</li>
+</ol>
+
+<p>Usage is simple: use the client library for your language (e.g., <code>node-redis</code>), <code>SET</code> a key with a value, and <code>GET</code> it by key.</p>
+
+<pre><code>SET weather:mumbai "{...json...}" EX 3600   # cache for 1 hour (TTL = 3600 seconds)
+GET weather:mumbai                           # cache hit returns the value, miss returns nil
+DEL weather:mumbai                           # invalidate manually</code></pre>
+
+<h2>7. Caching Strategies</h2>
+
+<h3>Lazy caching (cache-aside)</h3>
+<p>Cache only when something is actually requested — no predicting ahead of time.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant K as Cache
+    participant D as Primary storage
+    C->>S: Request resource
+    S->>K: Check the cache
+    alt Cache hit
+        K-->>S: Data
+    else Cache miss
+        S->>D: Fetch the data
+        D-->>S: Data
+        S->>K: Store the data
+    end
+    S-->>C: Response
+</pre>
+
+<ul>
+  <li>Pro: only data that is actually requested is cached.</li>
+  <li>Con: the first request for each item is slow (a miss).</li>
+</ul>
+
+<h3>Write-through caching</h3>
+<p>An <strong>update strategy</strong>: whenever data is created or changed (<code>POST</code>, <code>PUT</code>, <code>PATCH</code>), update the <strong>database and the cache in the same flow</strong>.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant D as Database
+    participant K as Cache
+    C->>S: Create or update a resource
+    S->>D: Write the change
+    S->>K: Write the same change
+    S-->>C: Response
+    Note over K: The cache is always fresh
+</pre>
+
+<ul>
+  <li>Pro: the cache is always fresh, so you never serve stale data.</li>
+  <li>Con: every write pays extra overhead (two writes).</li>
+</ul>
+
+<h2>8. Eviction Policies</h2>
+
+<p>RAM is limited (and managed services like ElastiCache have a set limit), so eventually the cache is full. An <strong>eviction policy</strong> decides which old data to remove to make room for new, more important data.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    N["New key arrives"] --> F{"Cache full?"}
+    F -- No --> S["Store the key"]
+    F -- Yes --> P{"Eviction policy"}
+    P -- "No eviction" --> ERR["Error: memory is full"]
+    P -- "LRU" --> A["Evict the least recently used key"]
+    P -- "LFU" --> B["Evict the least frequently used key"]
+    P -- "TTL based" --> T["Evict the key expiring soonest"]
+    A --> S
+    B --> S
+    T --> S
+</pre>
+
+<p>Worked example: the cache holds keys 1–4 and is full, and key 5 arrives.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Policy</th><th>How it decides</th><th>Example outcome</th></tr>
+<tr><td><strong>No eviction</strong></td><td>No policy configured; inserts fail once memory is full</td><td>Key 5 gets an error</td></tr>
+<tr><td><strong>LRU</strong> — Least Recently Used</td><td>Tracks <em>when</em> each key was last accessed; evicts the oldest access</td><td>Keys 1–3 were used today, key 4 yesterday → evict key 4</td></tr>
+<tr><td><strong>LFU</strong> — Least Frequently Used</td><td>Tracks <em>how many times</em> each key was accessed; evicts the lowest count</td><td>Access counts 5, 10, 6, 23 → evict key 1</td></tr>
+<tr><td><strong>TTL based</strong></td><td>Evicts the key with the least remaining time to live (closest to expiring anyway)</td><td>Evict the key expiring soonest</td></tr>
+</table>
+</div>
+
+<p>In Redis these are configured as <code>noeviction</code>, <code>allkeys-lru</code>, <code>allkeys-lfu</code>, <code>volatile-ttl</code>, and so on.</p>
+
+<h2>9. Backend Use Cases for Redis / In-Memory Caches</h2>
+
+<h3>1) Database query caching</h3>
+<ul>
+  <li><strong>Situation:</strong> a query with many joins and aggregations over millions of rows is compute-intensive, and its API is hit very frequently (e.g., a landing page or dashboard), loading the database.</li>
+  <li><strong>Solution:</strong> cache the result with a TTL (e.g., 1 hour). Serve from cache when present; otherwise compute once and store it. Update or delete the cached entry when the underlying data changes (<strong>invalidation</strong>).</li>
+  <li><strong>Amazon:</strong> product details, prices, and inventory rarely change but are read by millions of users during a sale. Serving those reads from cache keeps the database free for important work.</li>
+  <li><strong>Social media:</strong> user profile data changes rarely but a celebrity's profile may be read millions of times a day. Cache it and invalidate on edit.</li>
+  <li><strong>Rule of thumb:</strong> good candidates are <strong>read-heavy data with infrequent writes</strong>.</li>
+</ul>
+
+<h3>2) Session storage</h3>
+<p>After authentication, a session is created and looked up on <em>every</em> API call. Storing sessions in Redis avoids a database hit per request, since reading from RAM is much faster, and keeps latency and database load low.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant K as Redis
+    C->>S: Login
+    S->>K: Store session token with a TTL
+    S-->>C: Session token
+    C->>S: Later request with the token
+    S->>K: Look up the session
+    K-->>S: Session data
+    S-->>C: Response
+</pre>
+
+<h3>3) External API caching</h3>
+<ul>
+  <li><strong>Situation:</strong> your backend calls an external API (e.g., a weather API). Without caching, every one of your users' requests triggers an external call, which pushes you into <strong>rate limits</strong> and higher <strong>billing</strong>.</li>
+  <li><strong>Solution:</strong> weather doesn't change every second, so cache the response with a TTL of, say, 1 hour. All requests in that hour use the cached value; after expiry, fetch again and re-cache.</li>
+  <li>Only suitable for data that is not real-time critical.</li>
+</ul>
+
+<h3>4) Rate limiting</h3>
+<p>Rate limiting is usually a <strong>middleware</strong> that runs before your routes or controllers. It identifies the client (commonly by IP, from the <code>X-Forwarded-For</code> header set by a reverse proxy such as Nginx) and keeps a <strong>counter per client</strong> in Redis.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    R["Incoming request"] --> M["Rate limit middleware<br/>reads the client IP from X-Forwarded-For"]
+    M --> I["Increment the counter for that IP in Redis<br/>the counter expires after 1 minute"]
+    I --> Q{"Counter above 50?"}
+    Q -- Yes --> X["429 Too Many Requests"]
+    Q -- No --> N["Pass the request to the route or controller"]
+</pre>
+
+<pre><code>INCR rate:10.12.0.1        # returns the new count
+EXPIRE rate:10.12.0.1 60   # set once, when the count is 1, so the window resets after 60 seconds
+# if the count is above 50, respond with 429 Too Many Requests</code></pre>
+
+<ul>
+  <li>Purpose: protect expensive APIs and stop bots or abusive clients (for example, allow 50 requests per minute per IP).</li>
+  <li><strong>Why Redis and not a relational database?</strong> A relational database would work, but each request would pay an extra database call (even 20–30 ms matters for latency), and thousands of users making many requests per minute would flood the database with rate-limit traffic. In-memory storage fixes both: <strong>lower latency</strong> and <strong>less database load</strong>.</li>
+</ul>
+
+<h2>10. Trade-offs to Keep in Mind</h2>
+<ul>
+  <li><strong>Cost and capacity:</strong> memory is more expensive and smaller than disk, so you cache only a subset of the data.</li>
+  <li><strong>Staleness:</strong> cached data may be out of date. Handle it with TTLs, write-through updates, or invalidating on writes.</li>
+  <li><strong>Right data:</strong> cache data that is expensive to compute or fetch, read often, and changes rarely. Don't cache everything.</li>
+  <li><strong>Persistence:</strong> RAM is volatile. The cache should not be the only home of important data (the primary storage remains the source of truth).</li>
+</ul>
+
+<h2>11. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>Caching</strong> = keeping a <strong>subset</strong> of data in faster, cheaper-to-access storage to reduce time and effort. A <strong>hit</strong> is served from the cache; a <strong>miss</strong> falls back to the primary source.</li>
+  <li>Use it to avoid <strong>heavy computation</strong> and <strong>heavy data transfer</strong> (Google search, Netflix, Twitter trends).</li>
+  <li><strong>Three levels:</strong> network (CDN, DNS), hardware (CPU caches, RAM), software (Redis, Memcached, ElastiCache).</li>
+  <li><strong>CDN:</strong> origin server + edge servers grouped into PoPs; DNS routes users to the nearest PoP; hit → serve, miss → fetch from origin and cache; content expires by <strong>TTL</strong>.</li>
+  <li><strong>DNS caching</strong> happens at multiple layers (browser, OS, recursive resolver, some authoritative servers) to skip the full root → TLD → authoritative lookup.</li>
+  <li><strong>RAM</strong> is fast (random access, no mechanical parts) but limited and volatile; <strong>disk</strong> is slower but persistent and large. In-memory stores trade capacity and durability for speed.</li>
+  <li>Redis and Memcached are <strong>in-memory, key–value, NoSQL</strong> stores.</li>
+  <li><strong>Lazy caching (cache-aside):</strong> load into the cache on a miss. <strong>Write-through:</strong> update cache and database together, so the cache stays fresh but writes cost more.</li>
+  <li><strong>Eviction policies:</strong> no eviction, <strong>LRU</strong>, <strong>LFU</strong>, <strong>TTL-based</strong>.</li>
+  <li><strong>Use cases:</strong> DB query results, session storage, external API responses, rate limiting counters.</li>
+  <li>Rate limiting returns <strong><code>429 Too Many Requests</code></strong> and keeps counters in Redis to avoid latency and database load.</li>
+  <li>Good cache candidates: <strong>read-heavy, rarely changing</strong> data.</li>
+</ul>
+
+<h2>12. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What is caching and why is it used? What are cache hits and misses?</li>
+  <li>Why cache only a subset of the data instead of everything?</li>
+  <li>How does a CDN work? What are edge servers and a PoP?</li>
+  <li>How does DNS resolution work, and where does caching occur along the way?</li>
+  <li>What is TTL and why do cached items need one?</li>
+  <li>Why is RAM faster than disk? Why can't RAM just replace disk-based databases?</li>
+  <li>What is an in-memory key–value store? Name some examples (Redis, Memcached, ElastiCache, Valkey).</li>
+  <li>Explain lazy caching (cache-aside) vs write-through. What are the trade-offs?</li>
+  <li>What are eviction policies? Explain LRU, LFU, and TTL-based eviction with an example.</li>
+  <li>How would you cache an expensive, frequently called database query? How do you keep it consistent when data changes?</li>
+  <li>Why store sessions in Redis instead of the primary database?</li>
+  <li>Why would you cache the response from a third-party API?</li>
+  <li>How would you implement rate limiting with Redis? Which status code do you return, and why not use a relational database?</li>
+  <li>When should you <em>not</em> cache something?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

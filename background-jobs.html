@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Background Jobs &amp; Task Queues — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="caching.html">Caching</a>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>Background Jobs &amp; Task Queues — Interview Notes</h1>
+
+<h2>1. What Is a Background Job?</h2>
+
+<blockquote>
+A <strong>background job</strong> (background task) is any piece of code or workflow that runs <strong>outside the request–response life cycle</strong>.
+</blockquote>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    C["Client"] -- "request" --> S["Server"]
+    S -- "response" --> C
+    S -. "offloaded, outside the request-response cycle" .-> B["Background job in a separate process"]
+</pre>
+
+<ul>
+  <li>The work does <strong>not need to happen immediately</strong>; it isn't mission-critical to the response and isn't synchronous.</li>
+  <li>So it can be <strong>offloaded to a separate process</strong> and finish however it was programmed to.</li>
+  <li>Understanding this is key to building <strong>scalable and responsive</strong> backends.</li>
+</ul>
+
+<h2>2. Why We Need Them: The Signup Email Example</h2>
+
+<p>A user signs up on a SaaS platform. The front end calls your API; the server validates the email, name, and password (length, complexity), saves the user, and then must send a <strong>verification email</strong> (a link, or a 6- or 8-digit one-time code) to prove the user owns that address.</p>
+
+<p>Sending the email means your backend calls a <strong>third-party email provider</strong> (Resend, Mailgun, Brevo, ...) with the HTML template, recipient, subject, and sender. You don't control that service. It may be down or slow because of a traffic spike or an outage.</p>
+
+<h3>Synchronous approach — what goes wrong</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant DB as Database
+    participant E as Email provider
+    C->>S: Sign up
+    S->>DB: Save user and verification code
+    S->>E: Send verification email
+    Note over E: Provider is down
+    E--xS: Error or timeout
+    S-->>C: Either a 500 error or a misleading email-sent message
+</pre>
+
+<ul>
+  <li><strong>No error handling:</strong> the email call fails, so the whole signup API fails. Bad user experience.</li>
+  <li><strong>With error handling:</strong> signup succeeds and the UI says "we sent you a verification email", but it was <strong>never sent</strong>. The user must come back and press "resend". If the provider is still down, it fails again.</li>
+  <li>Your API's speed and reliability become <strong>dependent on an external service</strong>, which can cause timeouts.</li>
+</ul>
+
+<h3>Background job approach</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server, the producer
+    participant Q as Queue, the broker
+    participant W as Worker, the consumer
+    participant E as Email provider
+    C->>S: Sign up
+    S->>S: Validate, save user, create verification code
+    S->>Q: Enqueue send-email task, serialized as JSON
+    S-->>C: 201 Created, check your email
+    W->>Q: Dequeue the task
+    Q-->>W: Task, deserialized by the worker
+    W->>E: Send the email
+    E-->>W: Success
+    W->>Q: Acknowledge
+</pre>
+
+<ol>
+  <li>The server does its normal processing, then <strong>packages everything needed to send the email</strong> (template data, recipient, subject, user info) into a serialized format (e.g., JSON) and <strong>pushes it into a queue</strong>.</li>
+  <li>It <strong>returns success immediately</strong> (<code>200</code>/<code>201</code>). The user instantly sees "verification email sent".</li>
+  <li>A <strong>worker (consumer)</strong>, a program running in a <strong>different process</strong>, picks up the task, <strong>deserializes</strong> it into its native type (dict in Python, object in JavaScript, struct in Go), runs the registered handler, and calls the email provider.</li>
+  <li>Delivery typically takes milliseconds, or a few seconds under heavy load. That's fine since verification emails usually expire in 15–20 minutes.</li>
+</ol>
+
+<pre><code>// what the producer enqueues (serialized)
+{
+  "type": "send_verification_email",
+  "userId": "b1f0...",
+  "email": "user@example.com",
+  "code": "482913"
+}</code></pre>
+
+<h3>Failures and retries</h3>
+<p>If the provider is down, the API call fails inside the worker, so the <strong>task fails</strong>. Instead of breaking a request, the queue framework <strong>re-enqueues the task for a retry</strong>:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    T["Task runs in a worker"] --> R{"Succeeded?"}
+    R -- Yes --> A["Acknowledge, task removed from the queue"]
+    R -- No --> M{"Retries left?"}
+    M -- Yes --> W["Wait with exponential backoff<br/>1, 2, 4, 8 minutes"]
+    W --> T
+    M -- No --> F["Mark as failed, log and alert"]
+</pre>
+
+<ul>
+  <li><strong>Exponential backoff:</strong> wait longer after each failure (e.g., 1 min, then 2, 4, 8), up to a configured <strong>maximum number of retries</strong> (e.g., 5).</li>
+  <li>External outages are usually short (seconds), so the task most likely succeeds on the 2nd or 3rd attempt and the user still gets the email.</li>
+</ul>
+
+<p><strong>Benefits:</strong> (1) faster, more responsive APIs that aren't blocked by external services or heavy work; (2) built-in retry and failure handling for failure-prone work; (3) fewer timeouts and a better overall user experience.</p>
+
+<h2>3. Typical Things Offloaded to Background Jobs</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Task</th><th>Why it's a background job</th></tr>
+<tr><td><strong>Sending emails</strong></td><td>Depends on an external provider that can be slow or down.</td></tr>
+<tr><td><strong>Processing images / videos</strong></td><td>Resizing or re-encoding into multiple formats and resolutions for different devices and network conditions is heavy work.</td></tr>
+<tr><td><strong>Generating reports</strong></td><td>Daily, weekly, or monthly PDF/email reports of stats (e.g., a project management app's completed and pending tasks). Triggered on a schedule (cron); libraries like Celery and BullMQ support scheduled jobs.</td></tr>
+<tr><td><strong>Sending push notifications</strong></td><td>Involves calling an external service (see below).</td></tr>
+</table>
+</div>
+
+<h3>Push notifications</h3>
+<p>Push notifications (from Swiggy, Zomato, etc.) appear in the phone's notification panel. When an app is installed, the device is registered with the OS vendor's push service (Google for Android, Apple for iOS). Your backend stores the <strong>device token</strong> in the database and, to notify a user, makes a call to Google's or Apple's service, which delivers the notification. The backend cannot reach the phone directly. Since this is another external service call, it goes to a background task.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    B["Your backend<br/>stores device tokens in the database"] -- "background task calls" --> P["Google or Apple push service"]
+    P --> D["User's phone notification panel"]
+</pre>
+
+<h2>4. How a Task Queue Works</h2>
+
+<blockquote>
+A <strong>task queue</strong> is a system for managing and distributing background jobs. It's the engine that lets you reliably hand work off to a separate process. Think of it as a <strong>to-do list for your backend</strong>: application code adds tasks, and workers pick them off one by one.
+</blockquote>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    P["Producer<br/>your application code"] -- "enqueue: serialized task" --> Q[("Queue, the broker<br/>RabbitMQ, Redis, SQS")]
+    Q -- "dequeue" --> W1["Consumer, worker 1"]
+    Q -- "dequeue" --> W2["Consumer, worker 2"]
+    W1 -- "acknowledge" --> Q
+    W2 -- "acknowledge" --> Q
+</pre>
+
+<div class="table-wrap">
+<table>
+<tr><th>Component</th><th>Role</th></tr>
+<tr><td><strong>Producer</strong></td><td>Your application code (Node, Python, Go, ...). Creates the task with <strong>all the information the worker needs</strong>, serializes it (e.g., JSON), and <strong>enqueues</strong> it (adds it to the queue).</td></tr>
+<tr><td><strong>Queue / Broker</strong></td><td>Stores tasks until a worker is ready. A temporary holding area. There can be multiple queues (e.g., email queue, in-app notification queue, push notification queue).</td></tr>
+<tr><td><strong>Consumer / Worker</strong></td><td>Runs in a <strong>separate process or thread</strong> (possibly a separate codebase). Watches its queue, <strong>dequeues</strong> tasks, deserializes them, and runs the registered <strong>handler</strong> (the same logic you'd otherwise run synchronously).</td></tr>
+</table>
+</div>
+
+<h3>Technologies</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Type</th><th>Examples</th></tr>
+<tr><td><strong>Broker / queue backends</strong></td><td>RabbitMQ; Redis (Pub/Sub and other structures); Amazon SQS (a managed AWS queue service, deployed across regions, good for scaling widely)</td></tr>
+<tr><td><strong>Task frameworks</strong></td><td>Python: <strong>Celery</strong>; Node.js: <strong>BullMQ</strong>; Go: <strong>Asynq</strong>. They handle retries, scheduling, acknowledgements, and other edge cases.</td></tr>
+</table>
+</div>
+
+<h3>Acknowledgement and visibility timeout</h3>
+<ul>
+  <li>When a worker finishes a task it sends an <strong>acknowledgement (ack)</strong> to the queue, meaning "done, you can remove it".</li>
+  <li>If no ack arrives, the queue decides how to retry.</li>
+  <li><strong>Visibility timeout:</strong> the period during which a task is considered <strong>in progress</strong> by a worker. If the worker doesn't acknowledge within that time (it crashed, or the external service hung), the queue <strong>makes the task available to other workers</strong>. This ensures a task is <strong>never lost</strong> even though it was already taken off the queue.</li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant Q as Queue
+    participant W1 as Worker 1
+    participant W2 as Worker 2
+    Q->>W1: Deliver task, visibility timeout starts
+    Note over W1: Crashes or hangs, no acknowledgement
+    Note over Q: Timeout expires
+    Q->>W2: Task is visible again and is delivered
+    W2->>Q: Acknowledge
+</pre>
+
+<h2>5. Types of Tasks</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Type</th><th>Description</th><th>Examples</th></tr>
+<tr><td><strong>One-off</strong></td><td>A single task triggered by an event in a request. The most common type.</td><td>Verification email after signup, welcome email after verification, password reset email, notification for a new message</td></tr>
+<tr><td><strong>Recurring</strong></td><td>Runs periodically on a schedule (cron-style).</td><td>Daily, monthly, or annual reports. Cleanup jobs, e.g., deleting orphaned or inactive sessions from a <code>sessions</code> table (stateful auth) every month to free storage</td></tr>
+<tr><td><strong>Chain</strong></td><td>Tasks with a <strong>parent–child</strong> relationship: a child runs only after its parent succeeds. Independent children can run in parallel.</td><td>Video upload pipeline (below)</td></tr>
+<tr><td><strong>Batch</strong></td><td>One task fans out into many tasks, or many similar tasks run at once.</td><td>Delete account; sending thousands of reports at midnight</td></tr>
+</table>
+</div>
+
+<h3>Chain example: an LMS video upload (like Udemy)</h3>
+<p>An instructor uploads a video (e.g., directly to S3 via a pre-signed URL; the API responds right away so the request isn't blocked). Then:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    U["Video uploaded"] --> E["Encode video into multiple resolutions and formats"]
+    E --> T["Generate thumbnails"]
+    E --> S["Generate audio transcription, the subtitles"]
+    T --> TP["Process thumbnails into multiple sizes"]
+</pre>
+
+<ul>
+  <li>Thumbnail generation and transcription both depend on encoding but <strong>not on each other</strong>, so they run in <strong>parallel</strong>.</li>
+  <li>Thumbnail processing depends on thumbnail generation.</li>
+  <li>A child task runs only once its parent has completed successfully.</li>
+</ul>
+
+<h3>Batch example: delete account</h3>
+<p>Deleting a user's data may span many tables, shards, or regions and take a minute or more, far too long to block an API call. So the API <strong>enqueues a "delete account" task and immediately returns 200</strong>. The front end logs the user out. (Some platforms add a grace period of 3–7 days during which the user can log back in and cancel.) Then a worker does the actual work, which itself fans out into more tasks:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    API["Delete account API call"] --> Q["Enqueue delete-account task<br/>respond 200 immediately"]
+    Q --> D["Delete-account task in a worker"]
+    D --> A["Remove the user from their projects and entities"]
+    D --> B["Delete the profile"]
+    D --> C["Delete assets: logos, cover images"]
+    D --> F["Delete the user record"]
+    D --> G["Send an account-deleted email"]
+</pre>
+
+<p>Another batch example: at midnight or the end of the week a big platform triggers thousands of report-generation tasks, one per user.</p>
+
+<h2>6. Design Considerations at Scale</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Consideration</th><th>What to do</th></tr>
+<tr><td><strong>Idempotency</strong></td><td>Design tasks so they can be <strong>safely executed multiple times</strong> without unwanted side effects, because failed tasks get retried from scratch. Example: in delete-account, run the database changes in a <strong>transaction</strong> so a failure midway rolls back cleanly, and the retry starts from 0%.</td></tr>
+<tr><td><strong>Error handling</strong></td><td>The work runs in a different process, so it's easy to miss edge cases. Catch and <strong>log errors</strong> and let the queue <strong>retry</strong> failed tasks.</td></tr>
+<tr><td><strong>Monitoring</strong></td><td>Track queue length, number of successful and failed tasks, and the main causes of failure (external service vs internal error). Use metrics tooling such as <strong>Prometheus + Grafana</strong>.</td></tr>
+<tr><td><strong>Scalability</strong></td><td>Design so you can <strong>scale consumers horizontally</strong> (add more worker nodes) when load grows, keeping processing responsive.</td></tr>
+<tr><td><strong>Ordering</strong></td><td>If tasks must run in order, make sure your library or framework supports <strong>ordered delivery</strong>.</td></tr>
+<tr><td><strong>Rate limiting</strong></td><td>If tasks call external services, rate-limit them to avoid overloading those services, exceeding their API limits, or running up charges.</td></tr>
+</table>
+</div>
+
+<p><strong>Note on idempotency:</strong> queues generally guarantee that a task is delivered <em>at least once</em> (for example, after a visibility timeout), so a task can occasionally run twice. A transaction and rollback is one tool, but tasks with external side effects (e.g., sending an email, charging a card) also need protection against duplicates, for example an idempotency key or a "already sent" flag checked before the call.</p>
+
+<h2>7. Best Practices</h2>
+<ol>
+  <li><strong>Keep tasks small and focused</strong> — one task, one unit of processing. If one part fails, the others aren't affected, and only the small failed unit is retried. Use <strong>chain tasks</strong> for dependent steps. Small tasks are easier to scale, debug, monitor, and retry.</li>
+  <li><strong>Avoid long-running tasks</strong> — break them into smaller chunks (concurrent tasks or parent–child tasks). A long task is a sign it should be split.</li>
+  <li><strong>Use proper error handling and logging</strong> — so the queue can retry and you have the information to debug whether an external service or an internal error caused the failure.</li>
+  <li><strong>Monitor queue length and worker health</strong> — set up <strong>alerts</strong> (for example, when queue length passes a threshold or workers go down) so you can scale or debug quickly.</li>
+</ol>
+
+<h2>8. Key Interview Takeaways</h2>
+
+<ul>
+  <li>A <strong>background job</strong> runs outside the request–response life cycle. It's for work that is <strong>time-consuming</strong> or <strong>non-critical to the response</strong>, or that <strong>depends on external services</strong>.</li>
+  <li>Synchronous handling ties your API's latency and reliability to third parties (timeouts, 500s, or falsely reporting success). Offloading keeps APIs fast and lets you <strong>retry</strong>.</li>
+  <li><strong>Producer → Queue (broker) → Consumer (worker).</strong> The producer <strong>enqueues</strong> a <strong>serialized</strong> task; the worker (a separate process) <strong>dequeues</strong>, <strong>deserializes</strong>, and runs a handler.</li>
+  <li>The worker <strong>acknowledges</strong> success. If it doesn't within the <strong>visibility timeout</strong>, the task is handed to another worker, so tasks aren't lost.</li>
+  <li><strong>Retries with exponential backoff</strong> and a maximum retry count handle transient failures.</li>
+  <li>Common tools: RabbitMQ, Redis, Amazon SQS (brokers); Celery, BullMQ, Asynq (frameworks).</li>
+  <li>Task types: <strong>one-off, recurring, chain (parent–child), batch</strong>.</li>
+  <li>Typical jobs: emails, image/video processing, reports, push notifications, cleanup, account deletion.</li>
+  <li>Design for <strong>idempotency</strong>, robust <strong>error handling</strong>, <strong>monitoring</strong>, <strong>horizontal scaling</strong>, <strong>ordering</strong> where needed, and <strong>rate limiting</strong> for external calls.</li>
+  <li>Keep tasks <strong>small, focused, and short-lived</strong>; alert on queue length and worker health.</li>
+</ul>
+
+<h2>9. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What is a background job and why would you use one?</li>
+  <li>Walk through a signup flow that sends a verification email. What goes wrong if it's done synchronously?</li>
+  <li>Explain the roles of the producer, queue (broker), and consumer (worker).</li>
+  <li>Why must a task be serialized when enqueued? What does the worker do with it?</li>
+  <li>How do retries work? What is exponential backoff and why use it?</li>
+  <li>What are acknowledgements and the visibility timeout? What happens if a worker crashes mid-task?</li>
+  <li>Compare RabbitMQ, Redis, and Amazon SQS as brokers. Name a task framework for Python, Node.js, and Go.</li>
+  <li>What are one-off, recurring, chain, and batch tasks? Give an example of each.</li>
+  <li>Design the background workflow for video upload on a learning platform.</li>
+  <li>How would you implement account deletion for a large platform?</li>
+  <li>What does it mean for a task to be idempotent, and how do you achieve it when a task can be delivered more than once?</li>
+  <li>How do you monitor a task queue? What would you alert on?</li>
+  <li>How do you scale background processing?</li>
+  <li>Why rate-limit tasks that call external services?</li>
+  <li>Why should tasks be small and focused?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

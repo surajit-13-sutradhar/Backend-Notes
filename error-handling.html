@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Error Handling &amp; Fault Tolerance — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="full-text-search.html">← Full Text Search Using ElasticSearch</a>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>Error Handling &amp; Fault Tolerance — Interview Notes</h1>
+
+<h2>1. The Mindset</h2>
+
+<p>Errors are not just problems to solve; they are a <strong>normal part of building applications</strong>. Database queries will sometimes fail, external APIs will time out, users will send bad data, and your business logic will hit unexpected edge cases.</p>
+
+<blockquote>
+The question is not <em>whether</em> errors will happen, but <em>how you will handle them when they do</em>.
+</blockquote>
+
+<p>This chapter is about a <strong>fault-tolerant mindset</strong>: being ready to detect errors, contain them, and recover, rather than about specific tools or frameworks. It's what responsible backend engineers (who own core business logic and every transaction) need in startups, enterprises, and open source alike.</p>
+
+<h2>2. Types of Errors</h2>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    E["Errors a backend engineer meets"] --> L["Logic errors<br/>wrong behavior, no crash"]
+    E --> D["Database errors<br/>connection, constraints, queries, deadlocks"]
+    E --> X["External service errors<br/>network, auth, rate limits, outages"]
+    E --> V["Input validation errors<br/>bad data from users"]
+    E --> C["Configuration errors<br/>missing or wrong settings"]
+</pre>
+
+<h3>1) Logic errors</h3>
+<p>Probably the <strong>most dangerous</strong> type: the code runs fine but produces the <strong>wrong result</strong>, so nothing crashes and nothing alerts.</p>
+<ul>
+  <li><strong>Example:</strong> an e-commerce store accidentally applies a discount twice, producing <strong>negative shipping costs</strong>. The app doesn't crash but loses money on every order, possibly for weeks or months if nobody is monitoring or reporting it.</li>
+  <li><strong>Common causes:</strong> misunderstood requirements (confusing discussions with a client or PM, then shipping untested), incorrectly implemented algorithms (complex discount logic based on purchase history), and unconsidered edge cases or unexpected user behavior.</li>
+  <li>When money, payments, or security are involved, they can silently corrupt data and business results.</li>
+</ul>
+
+<h3>2) Database errors</h3>
+<p>Most backends rely heavily on the database, so these can take down the whole system.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Kind</th><th>Details</th></tr>
+<tr><td><strong>Connection errors</strong></td><td>The app can't talk to the database: network down, database overloaded, or the <strong>connection pool</strong> exhausted. (A pool keeps a set of open TCP connections so each request doesn't pay the connection-setup cost.) Result: 500s and empty screens.</td></tr>
+<tr><td><strong>Constraint violations</strong></td><td>An operation breaks a database rule: inserting a user with an existing email (<strong>unique</strong> violation), or inserting an order whose <code>customer_id</code> doesn't exist in <code>customers</code> (<strong>foreign key</strong> violation). Unhandled, they bubble up as a 500.</td></tr>
+<tr><td><strong>Query errors</strong></td><td>Malformed SQL, e.g., a typo in a table name, or queries too complex that <strong>time out</strong>.</td></tr>
+<tr><td><strong>Deadlocks</strong></td><td>Operations wait on each other in a circular dependency.</td></tr>
+</table>
+</div>
+<ul>
+  <li>Some constraint errors can be reduced with a <strong>stronger validation layer</strong>, but some (e.g., unique) <strong>can't be avoided</strong>: only the database knows whether an email is unique. For those, focus on <strong>error formatting</strong> so the front end can show a friendly message ("this email already exists, try another").</li>
+</ul>
+
+<h3>3) External service errors</h3>
+<p>Payment processors, email providers, object storage (S3), Redis, auth providers (Auth0, Clerk), AI APIs: each dependency is a <strong>point of failure you don't control</strong>. You can't avoid external dependencies (nobody rebuilds everything from scratch), so expect them to fail and plan for it.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Cause</th><th>Notes</th></tr>
+<tr><td><strong>Network</strong></td><td>Connection timeouts, DNS failures, network partitions. The internet is not perfect.</td></tr>
+<tr><td><strong>Authentication errors</strong></td><td>The external service rejects requests: bad credentials, expired tokens, insufficient permissions. Using a provider doesn't make you secure by itself; your own backend can still cause issues, e.g., exposing sensitive user data in logs.</td></tr>
+<tr><td><strong>Rate limiting</strong></td><td>Providers (email, AI, ...) block abnormal request volumes. A bug or a burst of user activity can make you exceed the limit and get <strong><code>429 Too Many Requests</code></strong>. Handle it with <strong>exponential backoff</strong>.</td></tr>
+<tr><td><strong>Service outages</strong></td><td>Even major cloud providers go down (incidents, maintenance). Handle gracefully with <strong>fallbacks</strong>. Example: if Redis is down, fall back to an in-memory cache or a second Redis node so core functions (payments, order processing) keep working.</td></tr>
+</table>
+</div>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    R["Call the external API"] --> S{"Response"}
+    S -- "Success" --> OK["Continue"]
+    S -- "429 Too Many Requests" --> W["Wait, e.g. 1 minute"]
+    W --> D["Retry"]
+    D --> S2{"Still 429?"}
+    S2 -- "No" --> OK
+    S2 -- "Yes" --> DB["Double the wait: 2, then 4 minutes, and so on"]
+    DB --> D
+</pre>
+
+<h3>4) Input validation errors</h3>
+<p>Caused by users sending bad data. The validation layer is your <strong>first line of defense</strong> against bad or malicious input, at the entry point of the backend. These are the <strong>easiest errors to expect and handle</strong> (unlike external dependencies or logic errors), so make the validation layer robust in any backend.</p>
+<ul>
+  <li><strong>Format:</strong> valid email, phone number, date. Be explicit about exactly what format you accept and accept only that.</li>
+  <li><strong>Range:</strong> number too high/low, string too long/short, array with fewer than 3 or more than 100 items.</li>
+  <li><strong>Required fields:</strong> mandatory fields must be present.</li>
+  <li>Response: typically <strong><code>400 Bad Request</code></strong>.</li>
+</ul>
+
+<h3>5) Configuration errors</h3>
+<p>These prevent an app from starting or make production behave unexpectedly, often surfacing when moving between <strong>development, staging, and production</strong>.</p>
+<p><strong>Example:</strong> you add an <code>OPENAI_API_KEY</code> to your local <code>.env</code>, merge the PR, and forget to add it to production's variables (manual, or from AWS Parameter Store, etc.). The deployment succeeds. What happens next depends on whether you validate configuration at startup:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    D["New deployment starts<br/>OPENAI_API_KEY is missing in production"] --> V{"Config validated at startup?"}
+    V -- "Yes: fail fast" --> F["App refuses to start with a clear message"]
+    F --> B["Blue-green deployment keeps the previous version running<br/>no user impact"]
+    V -- "No" --> R["App starts and serves users"]
+    R --> H["A user hits the endpoint that needs the key"]
+    H --> E["500 error at runtime: the worst case"]
+</pre>
+
+<ul>
+  <li><strong>Validate all required configuration before the server starts.</strong> If anything required is missing or corrupt, <strong>crash at startup</strong>, before serving real users.</li>
+  <li>With blue-green deployments, the old version keeps running until the new one starts successfully, so a fail-fast startup means <strong>no downtime</strong>.</li>
+  <li>Configuration management is covered in more depth in the next chapter of the series.</li>
+</ul>
+
+<h2>3. Prevention: Error Handling Starts Before the Error</h2>
+
+<blockquote>
+<strong>Key idea:</strong> the best error handling starts <em>before</em> errors happen. Find problems the moment they occur, before they spread and cause damage.
+</blockquote>
+
+<h3>Health checks (proactive error detection)</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    M["External monitoring tool<br/>pings the health endpoint"] --> H["GET /health"]
+    H --> P["Is the server running?<br/>200 means yes"]
+    H --> DB["Database checks<br/>connectivity, query performance, data integrity"]
+    H --> EX["External service checks<br/>test transactions, test emails, test tokens"]
+    H --> CF["Core functionality checks<br/>configuration loaded, caches populated, internal state consistent"]
+</pre>
+
+<ul>
+  <li><strong>Basic health endpoint</strong> (e.g., <code>/health</code> or <code>/status</code>): the important part is the <strong>status code</strong>. <code>200</code> = running; <code>4xx</code>/<code>5xx</code> = something's wrong. External tools ping it continuously.</li>
+  <li>But "running" isn't enough. Verify the services are actually <strong>doing their job</strong>:
+    <ul>
+      <li><strong>Database:</strong> can we connect? Is query performance normal (a query that took 500 ms now takes 4–5 s is a warning)? Is data integrity intact? Run a representative query and track its timing.</li>
+      <li><strong>External services:</strong> payment processors (periodic <strong>test transactions</strong>, so a successful one 5 minutes ago means you're probably fine), email (send test messages to internal addresses), auth (generate test tokens and validate them against the provider's endpoint).</li>
+      <li><strong>Core functionality:</strong> configuration loaded (fail with a meaningful message so the operator can fix it), caches populated, internal data structures consistent.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Monitoring and observability (overview)</h3>
+<p>A big topic covered in a later chapter. The main points:</p>
+<ul>
+  <li>Detect errors <strong>quickly</strong>, while they happen, with enough context to debug.</li>
+  <li><strong>Don't only track error rates.</strong> Track <strong>performance metrics</strong> (response times, resource usage, throughput) since degradation is often an early sign a service is about to fail.</li>
+  <li>Track errors across all sources: HTTP, database, external services, business logic.</li>
+  <li>Track <strong>business metrics</strong> too (successful transactions, successful logins). A sudden drop in successful transactions can indicate a technical problem even when error rates look normal.</li>
+  <li><strong>Structured logging</strong> (e.g., JSON logs) is easy to parse and add metadata to. Log aggregation tools like <strong>Grafana / Loki</strong> let you search logs, build dashboards, and store them externally.</li>
+</ul>
+
+<h2>4. Philosophies for Handling Errors</h2>
+
+<h3>1) Immediate error response</h3>
+<p>Your immediate reaction determines whether an error stays minor or becomes a major failure. It depends on the error type and context.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    ER["An error occurs"] --> Q{"Recoverable?"}
+    Q -- "Yes: network blips, temporary resource limits" --> RT["Retry with exponential backoff<br/>without adding stress to an already stressed system"]
+    Q -- "No" --> CG["Containment and graceful degradation"]
+    CG --> C1["Serve cached data"]
+    CG --> C2["Disable non-essential features"]
+    CG --> C3["Provide alternative functionality or a fallback"]
+</pre>
+
+<ul>
+  <li><strong>Recoverable errors</strong> (e.g., an email provider failing, running out of database connections): <strong>retries and exponential backoff</strong> work well. Be careful <strong>not to overwhelm an already stressed system</strong>. Your retry logic shouldn't add more load.</li>
+  <li><strong>Non-recoverable errors:</strong> use <strong>containment and graceful degradation</strong>: switch to cached data, disable non-essential features, offer a fallback, and limit the scope of the damage.</li>
+</ul>
+
+<h3>2) Error recovery strategies</h3>
+<ul>
+  <li><strong>Automatic recovery</strong> handles many errors without human intervention: automatically <strong>restart</strong> an unresponsive service, <strong>clean up</strong> corrupted caches, <strong>switch to backup</strong> systems. Design these carefully, since they can sometimes make things worse. Test to find what works for which service.</li>
+  <li><strong>Manual recovery</strong> is necessary when human judgment is required. <strong>Document</strong> the procedures (so the whole team and new hires know what to do during an incident) and <strong>test</strong> them, so they work quickly under stress.</li>
+  <li><strong>Data recovery:</strong> data is the most important asset (code and services are replaceable). Protect <strong>data integrity</strong> as a top priority: take backups at key moments, restore from backups, replay transaction logs, use specialized recovery tools.</li>
+</ul>
+
+<h3>3) Propagation control</h3>
+<ul>
+  <li>Not every error should be handled where it occurs. Sometimes it should <strong>propagate up</strong> to a level with <strong>more context</strong> (where you know the business meaning).</li>
+  <li>Keep the bubbling under <strong>your control</strong> so errors don't spread to other services or shut down the main service.</li>
+  <li>Use exception hierarchies (<code>try/catch</code> in JavaScript and Python): catch low-level exceptions, <strong>wrap them with context</strong>, and rethrow to higher levels, where you can log the right data, send a meaningful message to the client, or trigger recovery. This leads to global error handling (next section).</li>
+</ul>
+
+<h3>4) Error boundaries</h3>
+<p>Boundaries are the last point where you stop errors from propagating further. In service architectures they prevent an error in one service from affecting others:</p>
+<ul>
+  <li>Use <strong>separate processes</strong>.</li>
+  <li>Use <strong>timeouts</strong> to protect service boundaries.</li>
+  <li>Use <strong>message queues</strong> (e.g., RabbitMQ) for asynchronous communication, so a bug in one service doesn't cause another to fail.</li>
+</ul>
+
+<h2>5. Global Error Handling: the Final Safety Net</h2>
+
+<p>A mechanism that takes effort to set up once and pays off <strong>immediately and long term</strong>. It is arguably the most important error handling strategy in a backend.</p>
+
+<h3>The architecture</h3>
+<p>A typical backend has layers: <strong>routing → handler → service → repository</strong>.</p>
+<ul>
+  <li><strong>Handler:</strong> extracts data from the payload (deserialization, validation, binding), then calls a service.</li>
+  <li><strong>Service:</strong> orchestrates one or more repository methods.</li>
+  <li><strong>Repository:</strong> leaf functions that each do one unit of work, usually one database query (e.g., <code>getUserById</code>).</li>
+</ul>
+
+<h3>The pattern</h3>
+<p>Wherever an error occurs, <strong>bubble it up</strong> to a single <strong>global error-handling middleware</strong>, which turns it into the right HTTP response. Middleware has access to all incoming requests and outgoing responses.</p>
+<ul>
+  <li>In languages with exceptions (JavaScript, Python): <strong>throw</strong> the error and catch it in the middleware.</li>
+  <li>In languages like Go where errors are returned: keep <strong>returning</strong> the error from repository → service → handler until it reaches the middleware.</li>
+  <li>Use <strong>custom error types</strong> (available in every language) so the middleware can tell what kind of error it is.</li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    R["Routing"] --> H["Handler<br/>validation errors"]
+    H --> S["Service<br/>internal and business errors"]
+    S --> RP["Repository<br/>database errors"]
+    H -. "error bubbles up" .-> G
+    S -. "error bubbles up" .-> G
+    RP -. "error bubbles up" .-> G
+    G["Global error handler middleware<br/>the final safety net"] --> M{"What kind of error?"}
+    M -- "Validation" --> A["400 Bad Request<br/>with field errors"]
+    M -- "Unique constraint violation" --> B["400 Bad Request<br/>book already exists"]
+    M -- "No rows found" --> C["404 Not Found<br/>book with this ID does not exist"]
+    M -- "Foreign key violation" --> D["404 Not Found<br/>author ID does not exist"]
+    M -- "Anything unknown" --> E["500 Internal Server Error<br/>generic message"]
+</pre>
+
+<h3>Worked examples (book management API)</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Scenario</th><th>Where it's raised</th><th>Response</th></tr>
+<tr><td><code>POST /books</code> with a name over 500 characters</td><td>Handler (validation)</td><td><code>400</code> with the field errors so the user can fix the data</td></tr>
+<tr><td><code>POST /books</code> with a name that already exists</td><td>Repository (database <strong>unique constraint violation</strong>)</td><td><code>400</code>, message like "book already exists"</td></tr>
+<tr><td><code>GET /books/123</code> where no such book exists</td><td>Repository (the driver returns a <strong>"no rows"</strong> error)</td><td><code>404</code>, message like "book with ID 123 does not exist"</td></tr>
+<tr><td><code>POST /books</code> with an <code>authorId</code> that doesn't exist</td><td>Repository (<strong>foreign key violation</strong>)</td><td><code>404</code>, message like "author does not exist"</td></tr>
+<tr><td>Anything not recognized</td><td>Any layer</td><td><code>500</code> with a <strong>generic</strong> message such as "something went wrong"</td></tr>
+</table>
+</div>
+
+<p>A common HTTP error body has a <strong><code>code</code></strong> (the status code), a <strong><code>message</code></strong>, and optionally an array of <strong>field-level errors</strong>. An illustrative middleware:</p>
+
+<pre><code>function errorHandler(err, req, res, next) {
+  if (err instanceof ValidationError)
+    return res.status(400).json({ code: 400, message: "Validation failed", errors: err.fields });
+  if (err instanceof UniqueViolationError)
+    return res.status(400).json({ code: 400, message: "Book already exists" });
+  if (err instanceof NotFoundError)
+    return res.status(404).json({ code: 404, message: err.message });
+
+  logger.error({ err, correlationId: req.id });   // full details stay in the logs
+  return res.status(500).json({ code: 500, message: "Something went wrong" });
+}</code></pre>
+
+<p><em>(Illustrative sketch, not from the video.)</em> Status-code choices vary by team. For a duplicate resource, many APIs use <code>409 Conflict</code> rather than <code>400</code>, and some use <code>422</code> or <code>400</code> for a foreign key that points at a nonexistent record. What matters is that the mapping is <strong>consistent and defined in one place</strong>.</p>
+
+<h3>Two major advantages</h3>
+<ol>
+  <li><strong>More robust:</strong> it doesn't matter which layer an error comes from; the final gateway handles it. Without it, each layer must remember to translate errors. If one repository method forgets to handle a unique violation, the user gets a vague <code>500</code> instead of a meaningful message.</li>
+  <li><strong>Less redundancy:</strong> without a central handler, every repository method that runs SQL would need the same checks (is it a unique violation? a foreign key violation? ...), which spreads duplicated, bug-prone logic across the codebase.</li>
+</ol>
+
+<h2>6. Security Aspects of Error Handling</h2>
+
+<h3>1) Don't leak internals in error messages</h3>
+<ul>
+  <li>Never pass a raw error message from a lower layer to the client. Database errors can reveal <strong>table names, index names, constraint names</strong>, and other internals. Malicious users can use these for more advanced attacks (including SQL injection variants).</li>
+  <li>Compromising your <strong>users'</strong> security is even worse than compromising the platform: it damages trust and goodwill.</li>
+  <li>Keep control of messages: identify the error and write a <strong>user-facing message</strong>.</li>
+  <li>In the <strong>default (fallback) case</strong>, return <code>500</code> with a generic message ("Something went wrong" / "Internal server error"). If you reached the fallback, you didn't recognize the error, so its message likely contains internal details. Log the details server-side instead.</li>
+</ul>
+
+<h3>2) Login errors: prevent user enumeration</h3>
+<p>Authentication is one of the most targeted modules. Follow security guidance such as the <strong>OWASP cheat sheets</strong> (they have advice for authentication and many other areas).</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Response</th><th>Problem</th></tr>
+<tr><td>"A user with this email does not exist"<br>"Your password is incorrect"</td><td>Attackers can try many emails and learn <strong>which accounts exist</strong> (the message changes to "password is incorrect"), then guess common passwords for those known emails.</td></tr>
+<tr><td><strong>"Invalid email or password"</strong> for both cases</td><td>Reveals nothing about which part was wrong. Use this.</td></tr>
+</table>
+</div>
+
+<h3>3) Logging: don't log sensitive data</h3>
+<ul>
+  <li>Don't put <strong>emails, passwords, API keys, or credit card numbers</strong> in logs. Logs seem internal, but big companies produce hundreds of GB of logs a day and use multiple external services to store and analyze them. In many major breaches, the <strong>logs leaked</strong> and exposed sensitive data.</li>
+  <li>Instead, log the <strong>user ID</strong> (not the email) and a <strong>correlation ID</strong> so you have enough context to debug.</li>
+</ul>
+
+<h2>7. Key Interview Takeaways</h2>
+
+<ul>
+  <li>Errors are inevitable; the goal is a <strong>fault-tolerant mindset</strong>: detect, contain, recover.</li>
+  <li><strong>Five error categories:</strong> logic (silent and dangerous), database (connection, constraint, query, deadlock), external service (network, auth, rate limit, outage), input validation (easiest to handle), and configuration.</li>
+  <li><strong>Rate-limit errors (429):</strong> respond with <strong>exponential backoff</strong>. <strong>Outages:</strong> use <strong>fallbacks</strong>.</li>
+  <li><strong>Validate configuration at startup and fail fast</strong>; this avoids runtime 500s and, with blue-green deployments, avoids downtime.</li>
+  <li>The best error handling starts <strong>before</strong> errors happen: <strong>health checks</strong> that go beyond "server is up" (database, external services, core functionality) plus <strong>monitoring</strong> of performance and business metrics, and <strong>structured logs</strong>.</li>
+  <li><strong>Recoverable</strong> errors → retries with backoff (without stressing the system). <strong>Non-recoverable</strong> → containment and <strong>graceful degradation</strong>.</li>
+  <li>Prefer automatic recovery where safe; document and test manual procedures; protect <strong>data integrity</strong> (backups, transaction log replay).</li>
+  <li><strong>Propagation control:</strong> wrap low-level errors with context and bubble them up; <strong>error boundaries</strong> (separate processes, timeouts, message queues) stop errors spreading between services.</li>
+  <li><strong>Global error handler middleware</strong> = the final safety net: all layers bubble errors up; one place maps error types to HTTP responses (400 validation, 404 not found, 500 fallback, and so on). It is more robust and removes duplication.</li>
+  <li><strong>Security:</strong> don't leak internal details in messages (generic <code>500</code> fallback), use the <strong>same message for wrong email and wrong password</strong>, and never log sensitive data (log user IDs and correlation IDs instead).</li>
+</ul>
+
+<h2>8. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>Why are logic errors considered the most dangerous? How would you detect them?</li>
+  <li>What kinds of database errors can occur? How do you handle unique and foreign key violations?</li>
+  <li>What is a connection pool, and what happens when it's exhausted?</li>
+  <li>How do you handle an external API that rate-limits you? What is exponential backoff?</li>
+  <li>What would you do if a critical dependency (e.g., Redis) goes down?</li>
+  <li>Why should configuration be validated at startup? What happens if it isn't?</li>
+  <li>What should a health check verify beyond "the server is running"?</li>
+  <li>Why monitor performance and business metrics, not just error rates?</li>
+  <li>Recoverable vs non-recoverable errors: how do you respond to each? What is graceful degradation?</li>
+  <li>What are error boundaries and how do queues, timeouts, and separate processes help?</li>
+  <li>Explain global error handling. Why is it better than handling errors in each layer?</li>
+  <li>Which HTTP status codes would you return for validation failures, missing resources, duplicates, and unknown errors?</li>
+  <li>How could error messages compromise security? How would you design a login error response?</li>
+  <li>What should and shouldn't go into logs? What is a correlation ID?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

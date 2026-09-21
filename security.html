@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backend Security — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="error-handling.html">← Error Handling</a>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>Backend Security — Interview Notes</h1>
+
+<h2>1. The Mindset</h2>
+
+<p>Security is a huge domain: browser security (HTML, cookies, local storage), network security (HTTP/HTTPS, encryption), server/OS security, and <strong>backend application security</strong> (the vulnerabilities that come from the code <em>you</em> write). This chapter covers only the last one, practically.</p>
+
+<ul>
+  <li>The goal is <strong>not</strong> to learn a bag of fancy techniques. No application can ever be truly secure. The goal is to become <strong>paranoid</strong>: keep security at the back of your head whenever you write code.</li>
+  <li><strong>Think like an attacker.</strong> Attackers don't care about your framework or language. They ask one question: <strong>"Where did the developer make an assumption?"</strong></li>
+  <li>Typical assumptions: the input is clean; the user is who they say they are; the request comes from <em>my</em> front end; nobody will open the network tab and modify parameters. Under deadlines, these assumptions feel reasonable because you're thinking about the <strong>happy path</strong>. Attackers poke every boundary and guess every assumption.</li>
+  <li>Every time you write code, ask: <strong>"What could go wrong here, security-wise?"</strong></li>
+</ul>
+
+<h2>2. Injection Attacks</h2>
+
+<h3>The root cause</h3>
+<p>Your application <strong>speaks multiple languages</strong> to different systems, and each has its own grammar and special characters:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    U["User<br/>types input in the browser"] --> A["Your backend"]
+    A -- "SQL" --> DB[("Database")]
+    A -- "HTML, CSS, JavaScript" --> BR["Browser"]
+    A -- "Shell commands" --> OS["Operating system"]
+</pre>
+
+<blockquote>
+An injection happens when user input crosses the boundary into another language and is <strong>interpreted as code instead of treated as data</strong>. That confusion between code and data is the root cause of all injection attacks (SQL injection, command injection, XSS, ...).
+</blockquote>
+
+<h3>SQL injection</h3>
+<p>A login handler builds its query by <strong>concatenating strings</strong> (vulnerable; shown for illustration):</p>
+<pre><code>query = "SELECT * FROM users WHERE email = '" + email + "'"</code></pre>
+
+<div class="table-wrap">
+<table>
+<tr><th>Input</th><th>Resulting query</th><th>Effect</th></tr>
+<tr><td><code>alice@gmail.com</code> (happy path)</td><td><code>SELECT * FROM users WHERE email = 'alice@gmail.com'</code></td><td>Returns Alice's row.</td></tr>
+<tr><td><code>' OR '1'='1' --</code></td><td><code>SELECT * FROM users WHERE email = '' OR '1'='1' --'</code></td><td>The first <code>'</code> closes the string, so the left side is <code>email = ''</code> (false). <code>'1'='1'</code> is always true, so the <code>WHERE</code> is always true. <code>--</code> comments out the leftover quote. <strong>Every user is returned.</strong></td></tr>
+<tr><td><code>'; DROP TABLE users; --</code></td><td><code>SELECT * FROM users WHERE email = ''; DROP TABLE users; --'</code></td><td>A second statement runs and can delete the table.</td></tr>
+</table>
+</div>
+
+<ul>
+  <li>The characters aren't malicious by themselves. They become malicious once combined with your SQL template, where <code>'</code> delimits strings, <code>;</code> separates statements, <code>--</code> starts a comment, and words like <code>OR</code> / <code>DROP</code> are keywords. Concatenating means <em>trusting</em> that the input contains none of these, which is impossible even for benign users.</li>
+  <li>In the demo, the <code>DROP TABLE</code> variant did <strong>not</strong> run: many modern drivers block multiple statements in one query by default. Older drivers may allow it.</li>
+  <li>Attackers can do much more: <code>UNION</code> statements to extract data from other tables (e.g., payment info), database functions to <strong>read files</strong> from the server, and in some configurations <strong>execute OS commands</strong>.</li>
+</ul>
+
+<h3>Fix 1: parameterized queries (prepared statements)</h3>
+<p>Send the <strong>query structure</strong> and the <strong>data</strong> to the database separately. The value only ever fills a slot and is treated purely as <strong>data</strong>.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant App as Backend
+    participant DB as Database
+    App->>DB: 1. Query template with a slot, WHERE email = $1
+    App->>DB: 2. The value, sent separately as data
+    Note over DB: A value like ' OR '1'='1 is just a garbage string, not an email, so no rows match
+    DB-->>App: Result
+</pre>
+
+<pre><code>db.query("SELECT * FROM users WHERE email = $1", [userInput]);</code></pre>
+
+<ul>
+  <li>Every modern database driver supports this and every ORM uses it by default. You are only vulnerable if you deliberately bypass it by building raw strings.</li>
+  <li>Your <strong>validation layer</strong> should also reject something that doesn't look like an email before it ever reaches the query. Parameterization is the safety net if validation is weak.</li>
+</ul>
+
+<h3>Fix 2: least-privilege database user</h3>
+<p>The credentials your app uses to connect should only have permission for <strong>DML</strong> (data manipulation: <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>SELECT</code>), not <strong>DDL</strong> (data definition: <code>DROP</code>, <code>ALTER</code>, ...). Run migrations with a separate, more privileged user. Even if an injection slips through, it can't drop tables.</p>
+
+<h3>NoSQL injection</h3>
+<p>Using MongoDB doesn't make you safe. Queries are JSON objects that can contain <strong>operators</strong> (<code>$ne</code>, <code>$gt</code>, <code>$exists</code>, ...). If you pass user-supplied JSON straight into a query, an attacker can control the <em>structure</em>, not just the value. For example, sending <code>{"$ne": null}</code> where a string email was expected.</p>
+
+<h3>Command injection</h3>
+<p>Same idea, but the target is the <strong>operating system</strong>. Example: an image-upload service shells out to a CLI tool such as FFmpeg, and the output file name comes from the user:</p>
+<pre><code>ffmpeg -i input.png -vf scale=220:120 -o &lt;userSuppliedName&gt;
+
+# user supplies:  out.jpg; rm -rf /
+# the shell sees two commands, and the second one deletes the filesystem</code></pre>
+<ul>
+  <li>Attackers can also use pipes (<code>|</code>) to redirect output to other commands or <code>&amp;</code> to run things in the background (e.g., spyware). Every shell has its own special characters.</li>
+  <li><strong>Fix:</strong> use your language's process-execution API that takes the <strong>command and its arguments as separate parameters</strong> (an argument array). The arguments go directly to the process and never through a shell interpreter, so they are treated as plain strings.</li>
+</ul>
+
+<h3>The mental model</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Target system</th><th>Unsafe</th><th>Safe</th></tr>
+<tr><td>SQL database</td><td>String concatenation or templates</td><td><strong>Parameterized queries</strong></td></tr>
+<tr><td>Operating system</td><td>Building a shell command string</td><td><strong>Argument arrays</strong>, no shell</td></tr>
+<tr><td>Any interpreter (NoSQL, HTML, LDAP, XML, ...)</td><td>Mixing user input with control syntax</td><td>APIs that <strong>separate structure from data</strong></td></tr>
+</table>
+</div>
+<p>Whenever you build a string that another system will interpret and it contains user input, <strong>stop and look for a parameterized alternative</strong>. One almost always exists.</p>
+
+<h2>3. Authentication</h2>
+
+<p>Authentication = verifying the user's identity (which row in <code>users</code> this person is). Get it wrong and attackers can impersonate users, read their data, act on their behalf, and steal money (account takeover).</p>
+
+<h3>Advice: use an auth provider if you can</h3>
+<ul>
+  <li>Production auth is far more than "verify a JWT and store it in a cookie": <strong>stateful sessions</strong> (track devices, revoke one or all sessions), <strong>social login</strong> (Google, GitHub) with OAuth flows in both back end and front end, <strong>linking</strong> email/password and social accounts for the same email, RBAC, timeouts, cache and database revocation, and more.</li>
+  <li>Providers (e.g., Clerk, Auth0) save weeks of time and salary, and have dedicated security teams responding to new attacks 24/7. The bill only becomes large when you have thousands or millions of users, by which point you probably have revenue and can consider building your own.</li>
+  <li>Even with a provider, you must understand how auth works to configure and integrate it securely.</li>
+</ul>
+
+<h3>Password storage</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    A["1. Plain text<br/>a breach leaks every password, and insiders can read them<br/>users reuse passwords across sites"] --> B["2. Hash the password<br/>one-way, fixed length, deterministic"]
+    B --> C["Problem: rainbow tables<br/>precomputed hashes of common passwords"]
+    C --> D["3. Add a random salt per user<br/>identical passwords give different hashes"]
+    D --> E["Problem: brute force on fast hashes<br/>GPUs compute billions of SHA-256 hashes per second"]
+    E --> F["4. Use a slow password hash with a cost factor<br/>bcrypt, scrypt, Argon2id"]
+</pre>
+
+<ol>
+  <li><strong>Plain text is wrong.</strong> Databases get breached daily, at companies of every size, and by insiders or third parties. Most users reuse passwords, so a leak compromises their accounts elsewhere (banking, e-commerce, social media). Even without a breach, any developer or DBA with database access can read everyone's passwords.</li>
+  <li><strong>Hashing.</strong> A hash function accepts input of any length and always returns a <strong>fixed-length</strong> output; the same input <strong>always</strong> gives the same output; and it is <strong>one-way</strong> (you can't recover the input from the output). Store the hash. At login, hash the attempt and compare with the stored hash.</li>
+  <li><strong>Rainbow tables.</strong> Because hashes are deterministic, attackers keep huge tables mapping common passwords (<code>123456</code>, <code>password</code>) to their hashes, and look up a leaked database against them.</li>
+  <li><strong>Salting.</strong> Generate a random per-user string (from a <strong>cryptographically secure</strong> random generator), combine it with the password, then hash. Now identical passwords produce different hashes, so precomputed tables no longer match.</li>
+  <li><strong>Brute force.</strong> An attacker with your leaked database can still take each user's salt and guess passwords offline. Modern GPUs compute <strong>billions</strong> of general-purpose hashes (SHA-256, MD5) per second, so every password up to 8 characters or common pattern falls in days.</li>
+  <li><strong>Slow hashes.</strong> Use algorithms designed for passwords: <strong>bcrypt</strong>, <strong>scrypt</strong>, and now the industry standard <strong>Argon2id</strong>. They have a tunable <strong>cost (work) factor</strong>. If a hash takes ~400 ms, that's imperceptible for a real user logging in, but it cuts an attacker from billions of guesses per second to a handful, turning days into decades or centuries. <strong>Do not use MD5 or SHA-256 for passwords.</strong></li>
+</ol>
+
+<p><strong>Note:</strong> libraries like bcrypt and Argon2 generate the salt for you and embed it in the output hash string, so you usually don't need a separate salt column. Good reading: Lucia's auth guides (a resource on implementing auth with best practices) and the OWASP cheat sheets.</p>
+
+<h3>Sessions (stateful authentication)</h3>
+<p>After login, you can't ask for the password on every request. On successful login the server:</p>
+<ol>
+  <li>Generates a random <strong>session identifier</strong> from a <strong>cryptographically secure pseudo-random number generator</strong>, with at least 128 bits of entropy. If an attacker could guess it, they could hijack sessions.</li>
+  <li><strong>Stores it server-side</strong> (Redis for speed, or your primary database) along with metadata: which user, created time, expiry (e.g., 7 days), IP address and user agent (to show "where you're logged in" and support revocation).</li>
+  <li><strong>Sends it to the browser in a cookie.</strong> The browser returns it on every request.</li>
+</ol>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+    participant R as Session store, Redis or DB
+    B->>S: Email and password
+    S->>S: Verify against the stored password hash
+    S->>R: Create session, random ID with user, expiry, IP, user agent
+    S-->>B: Set-Cookie with the session ID
+    B->>S: Later request, cookie sent automatically
+    S->>R: Look up the session ID
+    R-->>S: Session, so we know the user
+    S-->>B: Response
+</pre>
+
+<h3>Cookie security flags</h3>
+<pre><code>Set-Cookie: sid=&lt;random&gt;; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800</code></pre>
+
+<div class="table-wrap">
+<table>
+<tr><th>Flag</th><th>Effect</th></tr>
+<tr><td><code>HttpOnly</code></td><td>JavaScript cannot read the cookie. If your site has an XSS vulnerability, injected scripts can't steal the session ID or token. (This is why storing tokens in <code>localStorage</code> is discouraged.)</td></tr>
+<tr><td><code>Secure</code></td><td>The browser only sends the cookie over <strong>HTTPS</strong>. Over plain HTTP, traffic can be intercepted on public Wi-Fi, by a malicious ISP or router, or with tools like Wireshark.</td></tr>
+<tr><td><code>SameSite</code></td><td>Controls whether the cookie is sent on cross-site requests. <strong><code>Strict</code></strong>: only for requests that originate from your own site. <strong><code>Lax</code></strong>: also sent on top-level navigations (a link to your site) but not from images/iframes. <strong><code>None</code></strong>: sent on all requests and requires <code>Secure</code>. For session cookies use <code>Strict</code> (or <code>Lax</code> if front end and back end are on different domains); avoid <code>None</code>. This defends against CSRF.</td></tr>
+</table>
+</div>
+
+<h3>Stateless authentication: JWT</h3>
+<p>With sessions, the server keeps the session data and gives the client just an ID. With a <strong>JWT (JSON Web Token)</strong>, the session data itself is sent to the client, and the client sends it back on every request.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    H["Header<br/>token type and signing algorithm"] --- P["Payload, the claims<br/>sub: user ID, iat: issued at, custom claims such as name or admin"] --- S["Signature<br/>signature of header and payload, made with a server-side secret"]
+</pre>
+
+<ul>
+  <li><strong>Why can't the client just claim to be someone else?</strong> The server signs header + payload with a secret. On each request it verifies the <strong>signature</strong> with the same secret. If anyone edits the payload (even changing "John Doe" to "John Do"), verification fails and the server rejects it.</li>
+  <li>The payload is only <strong>Base64-encoded, not encrypted</strong>. Anyone can decode and read it. Never store sensitive data in a JWT.</li>
+  <li><strong>Advantage:</strong> the server stores nothing, so it scales easily with no database or Redis lookup.</li>
+</ul>
+
+<h3>JWT drawbacks</h3>
+<ol>
+  <li><strong>Revocation is hard.</strong> With sessions you delete the row and the user is out immediately. With JWTs you can't recall a token the client holds. If an account is compromised, you can't force-logout all devices.
+    <ul>
+      <li>Workaround: a <strong>blacklist</strong> of revoked tokens (in Redis or the database).</li>
+      <li>Workaround: <strong>short-lived access tokens + refresh tokens</strong> (below).</li>
+    </ul>
+  </li>
+  <li><strong>Storage.</strong> <code>localStorage</code> is readable by any script, so an XSS vulnerability leaks the token. An <code>HttpOnly</code> cookie avoids that, but then you're back to a cookie-based flow.</li>
+</ol>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: Login
+    S-->>C: Access token, valid about 5 minutes, and refresh token, valid about 1 to 7 days
+    C->>S: Request with the access token
+    S-->>C: Response
+    Note over C,S: Access token expires
+    C->>S: Request with the expired access token
+    S-->>C: 401 Unauthorized
+    C->>S: Send the refresh token
+    S->>S: Check that the refresh token is valid and not expired
+    S-->>C: New access token and new refresh token
+</pre>
+
+<blockquote>
+<strong>Advice:</strong> unless you have specific scaling needs, <strong>prefer stateful, session-based authentication</strong>. Even with multiple servers, sessions can live in a distributed store like Redis. Revocation is simple and the architecture fits most SaaS products. If you do use JWTs: use <strong>short expiry</strong> (minutes to hours, not days), refresh tokens with <strong>server-side storage</strong>, and <strong>HttpOnly cookies</strong> instead of <code>localStorage</code>.
+</blockquote>
+
+<h3>Rate limiting authentication</h3>
+<p>Without rate limiting, an attacker can try thousands or millions of credential combinations per minute, or just flood the server until it crashes. Auth endpoints should be <strong>stricter</strong> than general endpoints, and use <strong>layers</strong>:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Layer</th><th>Example</th><th>Stops</th><th>Weakness</th></tr>
+<tr><td><strong>Per IP</strong></td><td>10 login attempts per minute per IP</td><td>Simple automated attacks</td><td>Many users can share one IP (universities, offices), and attackers rotate IPs (botnets, proxies, VPNs).</td></tr>
+<tr><td><strong>Per account</strong></td><td>5 failures in 15 minutes locks the account (e.g., 24 hours or until support)</td><td>IP rotation against one account</td><td>Doesn't stop one password tried across many accounts.</td></tr>
+<tr><td><strong>Global</strong></td><td>Alert when the system-wide failed-login rate passes a threshold (e.g., 100 per minute)</td><td>Distributed attacks across IPs and accounts</td><td>Needs a response: raise an alert, block IPs, show a CAPTCHA.</td></tr>
+</table>
+</div>
+
+<h2>4. Authorization</h2>
+
+<p>Authentication answers "who is this?". <strong>Authorization</strong> answers "what are they allowed to do?". The dangerous confusion is in implementation.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    R["Routing layer<br/>authentication middleware, role check, permission check such as read books"] --> H["Handler"]
+    H --> S["Service"]
+    S --> RP["Repository<br/>SELECT * FROM books WHERE id = 5"]
+    RP --> Q{"Does this query also check that the book belongs to this user?"}
+    Q -- "No" --> BAD["Broken object level authorization<br/>any user can read book 5"]
+    Q -- "Yes: AND user_id = context user" --> OK["Only the owner's data is returned"]
+</pre>
+
+<p>Passing authentication and even a "read books" permission at the routing layer creates a false sense of security. It does <strong>not</strong> mean the user may access <strong>every</strong> book.</p>
+
+<h3>BOLA — Broken Object Level Authorization (a.k.a. IDOR, Insecure Direct Object Reference)</h3>
+<ul>
+  <li><strong>What:</strong> the system checks auth at the routing layer but doesn't check <strong>ownership at the data level</strong>. Example: <code>GET /books?id=5</code>, where book 5 isn't the user's.</li>
+  <li><strong>Impact:</strong> a script can iterate through IDs and download every invoice or payment record, or modify them.</li>
+  <li><strong>Fix:</strong> verify access <strong>at the point of access</strong>, in the query itself:</li>
+</ul>
+<pre><code>SELECT * FROM invoices WHERE id = :id AND user_id = :contextUserId;</code></pre>
+<p>This applies to <strong>every</strong> query: reads, updates, deletes, and inserts, not just <code>SELECT</code>.</p>
+
+<h3>Don't leak existence: 404, not 403</h3>
+<p>Some engineers fetch invoice 5, then compare the owner and return <strong><code>403 Forbidden</code></strong> on a mismatch. That confirms invoice 5 <strong>exists</strong>, so an attacker can enumerate valid IDs and plan further attacks (like social engineering). Instead, use the single ownership query above. A missing row returns <strong><code>404 Not Found</code></strong>, and the attacker can't tell "doesn't exist" from "exists but isn't yours".</p>
+
+<h3>BFLA — Broken Function Level Authorization</h3>
+<ul>
+  <li><strong>What:</strong> access to <strong>sensitive functions</strong> (not data) isn't restricted. Example: <code>/admin/invoices</code> returns <em>all</em> invoices and has no admin check, because "only admins know the URL".</li>
+  <li>That's <strong>security through obscurity</strong>: hiding instead of protecting. Anyone watching traffic, or any logged-in user who finds the URL, can call it.</li>
+  <li><strong>Fix:</strong> add a <strong>role check</strong> in the routing layer (e.g., role = <code>admin</code>) in addition to the granular permission (e.g., <code>read invoices</code>, which both members and admins may have).</li>
+</ul>
+
+<h3>Predictable IDs</h3>
+<p>Sequential IDs (<code>101</code>, <code>102</code>, <code>103</code>) let attackers guess and enumerate resources. Random <strong>UUIDs</strong> make guessing impractical (with some performance considerations to read about). This is a mitigation, <strong>not</strong> a replacement for authorization checks.</p>
+
+<h3>A simple model: horizontal vs vertical</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    subgraph HZ["Horizontal: same privilege level"]
+        UA["User A"] -- "reads or changes" --> UB["User B's resources<br/>BOLA / IDOR"]
+    end
+    subgraph VT["Vertical: higher privilege level"]
+        M["Regular member"] -- "calls" --> AF["Admin-only functions<br/>BFLA"]
+    end
+</pre>
+
+<h3>Framework for preventing authorization bugs</h3>
+<ol>
+  <li><strong>Centralize</strong> authorization logic in one clear layer, so it's consistent, understandable, and maintainable, not scattered and easy to forget.</li>
+  <li><strong>Default deny:</strong> anything not explicitly allowed is denied. New resources and endpoints are protected until you grant access.</li>
+  <li><strong>Test authorization explicitly and automatically.</strong> Beyond the happy path: user A can't access user B's data, a member can't call admin functions, and an unauthenticated user can't reach protected resources. Run the tests in CI/CD so future changes can't silently open a hole.</li>
+  <li><strong>Audit logs:</strong> record access to sensitive resources (e.g., admin endpoints) and flag failed authorization attempts as security events, since someone may be probing your system.</li>
+</ol>
+
+<h2>5. XSS — Cross-Site Scripting</h2>
+
+<blockquote>
+XSS = an attacker gets <strong>their JavaScript to execute in another user's browser, in the context of your site</strong>. Root cause: user-provided content is treated as <strong>code</strong> rather than <strong>data</strong>.
+</blockquote>
+
+<p><strong>Why it's dangerous:</strong> JavaScript on your page can read everything on it (including sensitive data), read cookies and local storage that aren't <code>HttpOnly</code>, make API calls as the logged-in user, redirect users to phishing pages, and alter the page to impersonate another site.</p>
+
+<h3>Stored XSS example</h3>
+<p>A blog platform has comments written in markdown, converted to HTML and injected into the DOM. If the attacker finds a way to get a <code>&lt;script&gt;</code> tag into that HTML and it's stored and rendered without sanitization, it runs for <strong>every user who views the comment</strong>.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant A as Attacker
+    participant S as Server and database
+    participant V as Victim's browser
+    A->>S: Post a comment containing a script tag
+    Note over S: No sanitization, so it is stored as is
+    V->>S: Open the page with the comment
+    S-->>V: HTML including the attacker's script
+    Note over V: The script runs as if it were your site's code
+    V->>A: Script sends cookies and tokens to the attacker's server
+</pre>
+
+<ul>
+  <li>React deliberately names its raw-HTML prop <code>dangerouslySetInnerHTML</code> to warn you that you are on your own regarding XSS. Libraries like Remark/Rehype and frameworks have safety mechanisms built in, but if you inject HTML yourself, you're responsible.</li>
+  <li>Other kinds: <strong>reflected XSS</strong> (a script in the URL is echoed back in the page) and <strong>DOM-based XSS</strong> (client-side code writes untrusted data into the DOM, such as setting <code>innerHTML</code>).</li>
+</ul>
+
+<h3>Prevention</h3>
+<ol>
+  <li><strong>Sanitize</strong> user-provided markup (strip script tags and other dangerous constructs, ideally with a well-tested sanitizer library rather than hand-rolled rules), and rely on your framework's default output escaping where possible.</li>
+  <li><strong>CSP (Content Security Policy)</strong> — an HTTP response header telling the browser what it may execute or load: only scripts from specific domains, <strong>no inline scripts</strong>, images only from certain domains, and so on. An injected script tag would be blocked by the browser. CSP is <strong>defense in depth</strong>, the last line of defense, <em>not</em> the primary fix. You still need to fix the root cause.</li>
+  <li>Use <code>HttpOnly</code> cookies so injected scripts can't read session cookies.</li>
+</ol>
+
+<pre><code>Content-Security-Policy: default-src 'self'; script-src 'self'</code></pre>
+
+<p>General rule: every time you handle user-provided content (a search query, HTML, an image, a file), think about what it can do and what resources it can consume.</p>
+
+<h2>6. CSRF — Cross-Site Request Forgery</h2>
+
+<p>Covered briefly because it's much less of a threat on modern stacks, though legacy systems remain exposed. It works because browsers <strong>automatically attach cookies</strong> to requests to a site, even when the request is triggered from a <em>different</em> site.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant U as User, logged in to bank.com
+    participant E as evil.com
+    participant B as bank.com
+    U->>E: Visits a malicious page, for example via a phishing link
+    E-->>U: Page with an auto-submitting form or an image pointing at bank.com
+    U->>B: Browser sends the request and automatically attaches the bank.com cookie
+    Note over B: The server sees a valid session and performs the action
+</pre>
+
+<p><strong>Why it's mostly handled today:</strong></p>
+<ul>
+  <li><strong><code>SameSite</code> cookies</strong> (<code>Strict</code> or <code>Lax</code>) stop the cookie from being sent on such cross-site requests. Modern browsers default to <code>Lax</code>, so you're protected unless you set <code>None</code>.</li>
+  <li><strong>CORS</strong> configuration is not a security mechanism as such, but it is an additional line of defense: your server only allows requests from your own front end origin.</li>
+  <li>Legacy or cookie-heavy systems can also use anti-CSRF tokens.</li>
+</ul>
+
+<h2>7. Misconfiguration</h2>
+
+<h3>Secrets management</h3>
+<ul>
+  <li>Secrets = API keys, database passwords, encryption keys, JWT/auth secrets.</li>
+  <li><strong>Never put secrets in source code or commit them to Git</strong>. Anyone with repository access could use your database and external services.</li>
+  <li>Keep them in <strong>environment variables</strong> or a secret manager (AWS Parameter Store, HashiCorp Vault, etc.).</li>
+  <li>If a secret is ever committed, <strong>deleting it isn't enough</strong>, because it remains in the commit history. <strong>Rotate it</strong> (revoke and create a new one).</li>
+</ul>
+
+<h3>Debug mode in production</h3>
+<ul>
+  <li>Locally you log at <strong>debug</strong> level: stack traces (which reveal function names, file names, code structure), SQL queries, database configuration, transaction details, and possibly user data.</li>
+  <li>In production, the log level should be <strong>info</strong> or higher. Otherwise a breach of your logs (or verbose errors returned to clients) hands attackers a map of your system and users' data.</li>
+  <li>Be deliberate about the log level in local, staging, and production.</li>
+</ul>
+
+<h3>Security headers</h3>
+<ul>
+  <li><strong>CSP</strong> (above) and <strong><code>X-Frame-Options</code></strong> (or CSP <code>frame-ancestors</code>), which stop other sites from embedding yours in an <code>&lt;iframe&gt;</code>. This prevents <strong>clickjacking</strong>: an attacker hosts your site invisibly in a frame and tricks users into clicking or entering data.</li>
+  <li>Other industry-standard headers exist. Web frameworks in every language provide a security-headers middleware (e.g., Helmet for Express) that sets them with a one-line change.</li>
+</ul>
+
+<h2>8. The Big Picture</h2>
+
+<p>Every vulnerability above is about <strong>boundaries</strong>: data crossing between systems, privilege levels, languages, or markup contexts.</p>
+<ul>
+  <li>SQL injection: untrusted input crosses into the database query language.</li>
+  <li>XSS: user markdown crosses into HTML/JavaScript.</li>
+  <li>Broken authorization: requests cross the boundary of what each user should access.</li>
+</ul>
+
+<p>Every time you write code, ask three questions:</p>
+<ol>
+  <li><strong>Where is data crossing a boundary?</strong></li>
+  <li><strong>What assumptions am I making about that data?</strong></li>
+  <li><strong>What if those assumptions are wrong?</strong></li>
+</ol>
+
+<h3>Defense in depth</h3>
+<p>No single defense is perfect, so think in <strong>layers</strong>. An attacker must bypass all of them.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    I["Incoming request"] --> L1["1. Input validation<br/>strictly validate everything at the entry point"]
+    L1 --> L2["2. Parameterized operations<br/>SQL parameters, argument arrays, never string concatenation"]
+    L2 --> L3["3. Authorization at the point of access<br/>check ownership and role where the data is touched"]
+    L3 --> L4["4. Headers and policies<br/>CORS, CSP, security headers limit the damage if something slips through"]
+    L4 --> L5["5. Monitoring and logging<br/>log suspicious activity, raise alerts"]
+</pre>
+
+<blockquote>
+Security is not a list of techniques to implement. It's a <strong>mindset</strong>: be paranoid about your systems before writing every line of code.
+</blockquote>
+
+<h2>9. Resources for Going Deeper</h2>
+<ul>
+  <li><strong>PortSwigger Web Security Academy</strong> — free, with theory and practical labs on SQL injection, XSS, CSRF, clickjacking, SSRF, OS command injection, authentication, OAuth, and JWT attacks. (PortSwigger makes Burp Suite, a well-known penetration testing tool.)</li>
+  <li><strong>OWASP Top 10</strong> — the list of the most critical web application risks. It includes broken access control (BOLA/BFLA), security misconfiguration, and injection.</li>
+  <li><strong>OWASP Cheat Sheet Series</strong> — practical guidance per topic: authentication, session management (why session IDs must come from a cryptographically secure generator), and many others.</li>
+</ul>
+
+<h2>10. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>Think like an attacker:</strong> "where did the developer make an assumption?" No application is truly secure; be paranoid.</li>
+  <li><strong>Injection</strong> = user data interpreted as code (SQL, shell, NoSQL operators, HTML/JS). Fix: <strong>separate structure from data</strong>. Use <strong>parameterized queries</strong> and <strong>argument arrays</strong>, validate input, and use a <strong>least-privilege</strong> (DML-only) database user.</li>
+  <li><strong>Passwords:</strong> never plain text. Use a <strong>slow, salted password hash</strong> (Argon2id, bcrypt, scrypt) with a cost factor. Not MD5 or SHA-256. Salt defeats rainbow tables; slowness defeats brute force.</li>
+  <li><strong>Sessions:</strong> a random ID from a CSPRNG, stored server-side (Redis or DB), sent in a cookie with <strong><code>HttpOnly</code>, <code>Secure</code>, <code>SameSite</code></strong>.</li>
+  <li><strong>JWT:</strong> header.payload.signature. The payload is <strong>readable</strong> (Base64) but <strong>tamper-proof</strong> (signed). Revocation is hard. Mitigate with short-lived access tokens + refresh tokens. Prefer sessions unless you have specific scaling needs.</li>
+  <li><strong>Rate limit</strong> auth endpoints in layers: per IP, per account, and global.</li>
+  <li><strong>Authorization must be checked at the point of access</strong>, not only at the routing layer. <strong>BOLA/IDOR</strong> (horizontal) and <strong>BFLA</strong> (vertical). Return <strong>404</strong> instead of 403 to avoid leaking existence. Use <strong>UUIDs</strong>, but never treat them as a substitute for checks.</li>
+  <li>Authorization framework: <strong>centralize, default deny, automated tests, audit logs</strong>.</li>
+  <li><strong>XSS:</strong> attacker JavaScript runs in the victim's browser. Prevent with <strong>sanitization/escaping</strong>, <code>HttpOnly</code> cookies, and <strong>CSP</strong> as defense in depth. <strong>CSRF:</strong> largely mitigated by <code>SameSite</code> cookies (and CORS).</li>
+  <li><strong>Misconfiguration:</strong> keep secrets out of Git (and rotate leaked ones), don't run debug logging in production, and set security headers (CSP, clickjacking protection).</li>
+  <li><strong>Defense in depth:</strong> validation → parameterized operations → authorization at the point of access → headers and policies → monitoring and logging.</li>
+</ul>
+
+<h2>11. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What is SQL injection? Walk through how <code>' OR '1'='1' --</code> changes a query.</li>
+  <li>How do parameterized queries prevent SQL injection? What else limits the damage (least-privilege DB user)?</li>
+  <li>Is NoSQL immune to injection? What is command injection and how do you prevent it?</li>
+  <li>Why is storing plain-text passwords wrong? How do hashing, salting, and slow hashing each help? Why not SHA-256?</li>
+  <li>What is a rainbow table? What is a cost (work) factor?</li>
+  <li>How do session-based and JWT-based authentication differ? Trade-offs?</li>
+  <li>Why is JWT revocation hard, and what are the workarounds? What are access and refresh tokens?</li>
+  <li>Where should you store a session token or JWT in the browser, and why?</li>
+  <li>What do <code>HttpOnly</code>, <code>Secure</code>, and <code>SameSite</code> do?</li>
+  <li>How would you rate limit a login endpoint? Why is one layer not enough?</li>
+  <li>What are BOLA/IDOR and BFLA? Give examples and fixes.</li>
+  <li>Why return 404 rather than 403 for resources the user doesn't own?</li>
+  <li>Horizontal vs vertical privilege escalation?</li>
+  <li>How would you design authorization so mistakes are unlikely (centralized, default deny, tests, audit logs)?</li>
+  <li>What is XSS? Types? How do sanitization and CSP help, and why isn't CSP the primary fix?</li>
+  <li>What is CSRF, and why does <code>SameSite</code> mostly solve it?</li>
+  <li>How should secrets be managed? What if one is committed to Git?</li>
+  <li>Why is debug logging in production a security risk?</li>
+  <li>What is clickjacking and which header defends against it?</li>
+  <li>What is defense in depth? Name the layers you would put in a backend.</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

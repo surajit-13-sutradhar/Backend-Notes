@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Full-Text Search &amp; Elasticsearch — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="background-jobs.html">← Background Jobs &amp; Task Queues</a>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>Full-Text Search &amp; Elasticsearch — Interview Notes</h1>
+
+<h2>1. The Problem: Why <code>LIKE</code> Stops Working</h2>
+
+<p>Imagine it's 2005. You work at a fast-growing e-commerce company with about 5,000 products, and you must build a search API. In a relational database that looks like:</p>
+
+<pre><code>SELECT * FROM products
+WHERE name ILIKE '%laptop%' OR description ILIKE '%laptop%';</code></pre>
+
+<p>The <code>%</code> signs match any characters before and after the keyword, so a product matches if the keyword appears in the name <em>or</em> the description. With a few thousand products, it's fast and life is simple.</p>
+
+<p>Then the company grows to <strong>millions of products</strong>. The query that took ~50 ms now takes ~30 seconds. Customers and managers are frustrated, and there are new requirements:</p>
+<ol>
+  <li><strong>Speed</strong> — results in milliseconds.</li>
+  <li><strong>Relevance</strong> — searching "laptop" should show a MacBook Pro before a laptop bag.</li>
+  <li><strong>Typo tolerance</strong> — customers in a hurry type "lapotp"; results should still be relevant.</li>
+</ol>
+
+<p>This is the story of why search engines like <strong>Elasticsearch</strong> exist.</p>
+
+<h2>2. The Librarian Analogy</h2>
+
+<p>Think of your relational database as a <strong>librarian</strong> who knows where every book is, but has one fatal flaw: to find books about "machine learning" they must <strong>check every book on every shelf, one by one</strong>. (In database terms, a <strong>sequential scan</strong> of every row, examining every text field and pattern-matching character by character.)</p>
+
+<ul>
+  <li><strong>Slow:</strong> the time grows with the size of the library, minutes, hours, or days for millions or billions of books.</li>
+  <li><strong>No concept of relevance:</strong> a book titled <em>Introduction to Machine Learning</em> and a book that mentions the phrase once on its last page are both just "matches", returned in arbitrary order. The truly relevant result might land at position 1,000 or 10,000.</li>
+</ul>
+
+<p>A <code>LIKE '%term%'</code> pattern with a leading wildcard also can't use a normal B-tree index, which is why it degrades into scanning the whole table.</p>
+
+<p>Around 2005 the information explosion (Google crawling billions of pages, Amazon cataloging millions of products, LinkedIn indexing millions of profiles) made this unacceptable: even 2 seconds of delay hurts conversion, and search must return in milliseconds. The answer came from decades of text-search and information-retrieval research (since the 1960s).</p>
+
+<h2>3. The Key Idea: the Inverted Index</h2>
+
+<blockquote>
+<strong>Flip the problem.</strong> Instead of going through every document to find a term, build an index <em>ahead of time</em> that maps each <strong>term → the documents (and positions) where it appears</strong>. That's an <strong>inverted index</strong>.
+</blockquote>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    subgraph SCAN["Without an index: scan everything"]
+        direction TB
+        Q1["Query: machine learning"] --> B1["Book 1: no"] --> B2["Book 2: no"] --> B3["Book 3: match"] --> B4["... every remaining book ..."]
+    end
+    subgraph INV["With an inverted index: look up the term"]
+        direction TB
+        Q2["Query: machine learning"] --> L["Look up terms in the index"] --> R["Directly get the matching documents"]
+    end
+</pre>
+
+<p>When books first arrive, take all their words and record, for each word, which books contain it and where:</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    T1["term: machine"] --> D1["Introduction to Machine Learning<br/>pages 1, 15, 23"]
+    T1 --> D2["The Machine Age<br/>pages 5, 89"]
+    T1 --> D3["Coffee Machine Manual<br/>page 1"]
+    T2["term: learning"] --> D4["Introduction to Machine Learning<br/>pages 1, 16, 24"]
+    T2 --> D5["Learning to Cook<br/>2 places"]
+    T2 --> D6["Deep Learning Fundamentals<br/>3 places"]
+</pre>
+
+<p>(Page numbers are illustrative; in real books these words would appear on hundreds of pages.) Now to search "machine learning", the librarian just consults the index: terms lead to content, instead of content being scanned for terms. Hence "inverted".</p>
+
+<ul>
+  <li>This is what powers <strong>Elasticsearch</strong>. It is built on <strong>Apache Lucene</strong>, the underlying inverted-index-based text-search library.</li>
+  <li>Elasticsearch isn't the only tool. Many full-text search tools use Lucene, and even relational databases like <strong>PostgreSQL</strong> have built-in full-text search.</li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Documents indexed ahead of time<br/>text split into terms"] --> I[("Inverted index<br/>term to documents")]
+    Q["User query"] --> P["Split the query into terms"]
+    P --> I
+    I --> S["Score each matching document"]
+    S --> R["Ranked results, most relevant first"]
+</pre>
+
+<h2>4. Relevance Scoring</h2>
+
+<p>The second big advantage is <strong>relevance</strong>: results are ranked, not just matched. Elasticsearch scores each matching document using the <strong>BM25</strong> algorithm. You don't need to know the math; you do need to know the ideas behind its parameters. (In Elasticsearch, a single entity is called a <strong>document</strong>, a JSON document, similar to MongoDB.)</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Factor</th><th>Meaning</th></tr>
+<tr><td><strong>Term frequency</strong></td><td>How often the term appears <em>in this document</em>. More occurrences → more relevant.</td></tr>
+<tr><td><strong>Document frequency</strong></td><td>How common the term is <em>across all documents</em>. Rarer terms are more informative.</td></tr>
+<tr><td><strong>Document length</strong></td><td>How long the document is (a match in a short document counts for more than in a very long one).</td></tr>
+<tr><td><strong>Field boosting</strong></td><td>Which <strong>field</strong> matched. A match in the <code>title</code> is more relevant than in the <code>description</code>, which is more relevant than in the <code>content</code>. You can define your own boosts in the query.</td></tr>
+</table>
+</div>
+
+<p>Example: searching "machine": <em>Introduction to Machine Learning</em> ranks first (the term is in the title <em>and</em> appears frequently). <em>The Machine Age</em> is second (in the title, but less frequent), and so on.</p>
+
+<p>Queries are written in the Elasticsearch <strong>Query DSL</strong>, a JSON-based query language with many parameters for different kinds of search. An illustrative example combining field boosting and typo tolerance:</p>
+
+<pre><code>GET /products/_search
+{
+  "query": {
+    "multi_match": {
+      "query": "laptop",
+      "fields": ["name^3", "description"],   // a match in name counts 3x
+      "fuzziness": "AUTO"                    // tolerate small typos
+    }
+  }
+}</code></pre>
+
+<p><em>(This query is an added example, not shown in the video.)</em></p>
+
+<h2>5. Typo Tolerance and Type-Ahead</h2>
+
+<ul>
+  <li>Full-text search engines can infer intent despite typos. In the Google-search example, typing "what is <strong>treading</strong> today" still surfaces "what is <strong>trending</strong> today". (Whether Google uses Elasticsearch or something proprietary built on Lucene isn't known; the experience is similar.)</li>
+  <li>The same technology builds <strong>type-ahead / autocomplete</strong> interfaces (as on Amazon).</li>
+  <li>In Elasticsearch, this is typically done with <strong>fuzzy matching</strong> (matching terms within a small edit distance).</li>
+</ul>
+
+<h2>6. Choosing a Tool: PostgreSQL FTS or Elasticsearch?</h2>
+
+<p>For a search-like feature in your backend, there are two common options:</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Option</th><th>When it fits</th></tr>
+<tr><td><strong>PostgreSQL full-text search</strong></td><td>You already use Postgres and want search without adding new infrastructure.</td></tr>
+<tr><td><strong>Elasticsearch</strong></td><td>You need rich relevance tuning, typo tolerance, type-ahead, and search at large scale. Also a strong choice if your company <strong>already runs Elasticsearch</strong> (e.g., for logs).</td></tr>
+</table>
+</div>
+
+<pre><code>-- PostgreSQL full-text search (illustrative)
+CREATE INDEX idx_reviews_fts ON reviews USING GIN (to_tsvector('english', review));
+
+SELECT id, review, sentiment
+FROM reviews
+WHERE to_tsvector('english', review) @@ plainto_tsquery('english', 'laptop');</code></pre>
+
+<p><em>(Added example, not shown in the video.)</em></p>
+
+<h3>The ELK stack</h3>
+<p>Elasticsearch is also famous in <strong>log management</strong>: the <strong>ELK stack</strong> is <strong>E</strong>lasticsearch + <strong>L</strong>ogstash + <strong>K</strong>ibana. Elasticsearch is very fast at searching through logs, computing statistics, and visualizing data. If your company already has Elasticsearch for logs, using it for full-text search requirements is a sensible choice instead of Postgres.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    L["Logs and data sources"] --> LS["Logstash<br/>collect and process"]
+    LS --> ES[("Elasticsearch<br/>store and search")]
+    ES --> K["Kibana<br/>visualize and explore"]
+</pre>
+
+<h2>7. Demo: Postgres <code>ILIKE</code> vs Elasticsearch</h2>
+
+<p>A Next.js prototype compares the same search on both systems. For fairness, both are cloud-hosted in the <strong>US-West</strong> region, so network distance isn't a major factor: <strong>Neon</strong> (serverless Postgres) and <strong>Elastic Cloud</strong>.</p>
+
+<h3>Setup</h3>
+<ul>
+  <li><strong>Data:</strong> a CSV of <strong>50,000 reviews</strong>, each with a <code>review</code> and a <code>sentiment</code> (positive or negative).</li>
+  <li><strong>Postgres:</strong> a <code>reviews</code> table with <code>id</code>, <code>review</code> (text) and <code>sentiment</code>. A Node.js populate script filters out rows missing either field and inserts in <strong>batches of 1,000</strong> (a single huge insert hits limits on the Neon instance).</li>
+  <li><strong>Elasticsearch:</strong> a <code>reviews</code> index (deleted and recreated if it already exists), with the mapping <code>review: text</code> and <code>sentiment: keyword</code>, loaded with a <strong>bulk insert</strong> of all 50,000 records.</li>
+</ul>
+
+<h3><code>text</code> vs <code>keyword</code> field types</h3>
+<ul>
+  <li><code>text</code> — <strong>analyzed for full-text search</strong>: the value is broken into terms (and normalized) so individual words can be searched and scored.</li>
+  <li><code>keyword</code> — stored as a <strong>single exact value</strong>, matched exactly (good for statuses, tags, sentiment labels).</li>
+</ul>
+
+<h3>How the demo API works</h3>
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant UI as Next.js UI
+    participant API as API route
+    participant PG as Postgres on Neon
+    participant ES as Elasticsearch on Elastic Cloud
+    UI->>API: Search term
+    par Postgres search
+        API->>PG: SELECT with ILIKE and percent signs
+        PG-->>API: Matching rows, slower
+    and Elasticsearch search
+        API->>ES: Search the reviews index
+        ES-->>API: Hits, faster
+    end
+    API-->>UI: Stream each result as soon as it is ready, with its timing
+</pre>
+
+<ul>
+  <li>The route <strong>streams</strong> each system's result to the front end as soon as it's available, so one doesn't delay the other and you can see which is faster.</li>
+  <li>The Postgres side is the classic <code>SELECT ... WHERE review ILIKE '%term%'</code> (case-insensitive, any characters before and after).</li>
+  <li>The Elasticsearch side runs a query-string search over the index with the term lower-cased and wrapped in wildcards, so the match criteria are the same on both sides.</li>
+</ul>
+
+<h3>Results</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Search term</th><th>Elasticsearch</th><th>Postgres <code>ILIKE</code></th></tr>
+<tr><td><code>laptop</code></td><td>about 1 second</td><td>about 3 seconds</td></tr>
+<tr><td><code>something</code></td><td>about 500 ms (around 8,000 results)</td><td>about 7.5 seconds (the same number of results)</td></tr>
+</table>
+</div>
+
+<p>Both return the same number of results, but Elasticsearch is significantly faster. <strong>Caveat:</strong> this compared Elasticsearch with Postgres <code>ILIKE</code> pattern matching, not with Postgres full-text search (<code>tsvector</code> plus a GIN index), which would narrow the gap. The demo's point is the cost of <code>LIKE</code>-style scanning.</p>
+
+<h3>How much should you learn?</h3>
+<ul>
+  <li><strong>Database knowledge</strong> (working with databases, optimizing them, understanding indexes) is something you must <strong>master</strong>; it touches almost all of your codebase as a backend engineer.</li>
+  <li><strong>Elasticsearch</strong> is a tool to have in your arsenal: know when to use it and adapt examples from the docs. The docs' snippets cover most search use cases. Read deeper only if you need to optimize.</li>
+</ul>
+
+<h2>8. Key Interview Takeaways</h2>
+
+<ul>
+  <li>Relational <code>LIKE '%term%'</code> search <strong>scans every row</strong>, so it gets slower as data grows, and it has <strong>no notion of relevance</strong>.</li>
+  <li>Search engines solve this with an <strong>inverted index</strong>: <strong>term → documents (and positions)</strong>, built ahead of time. Lookup replaces scanning.</li>
+  <li><strong>Elasticsearch</strong> is built on <strong>Apache Lucene</strong>. Documents are JSON; queries use a JSON-based <strong>Query DSL</strong>.</li>
+  <li><strong>Relevance scoring (BM25)</strong> uses <strong>term frequency</strong>, <strong>document frequency</strong>, <strong>document length</strong>, and <strong>field boosting</strong> (title &gt; description &gt; content, configurable).</li>
+  <li>Search engines also give <strong>typo tolerance</strong> and <strong>type-ahead</strong> experiences.</li>
+  <li><strong>Options:</strong> PostgreSQL full-text search, or Elasticsearch, especially if your company already runs it (e.g., as part of the <strong>ELK stack</strong> for logs).</li>
+  <li>In the demo, Elasticsearch returned the same ~8,000 results in about 0.5 s vs about 7.5 s for Postgres <code>ILIKE</code>.</li>
+  <li>Field types: <strong><code>text</code></strong> (analyzed, full-text) vs <strong><code>keyword</code></strong> (exact match).</li>
+  <li>Master databases first; treat Elasticsearch as a tool you can pick up from the docs.</li>
+</ul>
+
+<h2>9. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>Why does <code>LIKE '%term%'</code> become slow at scale? Why can't a normal index help?</li>
+  <li>What is an inverted index? How does it differ from scanning documents?</li>
+  <li>How does a search engine rank results? Explain term frequency, document frequency, document length, and field boosting.</li>
+  <li>What is BM25?</li>
+  <li>What is Apache Lucene and how does it relate to Elasticsearch?</li>
+  <li>How would you support typo tolerance and type-ahead search?</li>
+  <li>PostgreSQL full-text search vs Elasticsearch: how would you choose?</li>
+  <li>What is the ELK stack, and what is Elasticsearch used for there?</li>
+  <li>What is the difference between <code>text</code> and <code>keyword</code> fields in Elasticsearch?</li>
+  <li>How would you keep an Elasticsearch index in sync with your primary database?</li>
+  <li>How would you benchmark a database search against Elasticsearch fairly?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>
