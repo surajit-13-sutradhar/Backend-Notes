@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Handlers, Services, Repositories, Middleware & Request Context — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="https://claude.ai/artifact/42iPzavZfhBEeAYk21Qdtk">← Validations &amp; Transformations</a>
+  <a href="https://claude.ai/artifact/LFVNr8SeVpxhHspJu78Wef">Chapters</a>
+</nav>
+
+<h1>Handlers, Services, Repositories, Middleware &amp; Request Context — Interview Notes</h1>
+
+<p>Three closely related topics covered together: the <strong>Handler/Service/Repository pattern</strong>, <strong>Middleware</strong>, and <strong>Request Context</strong>. All three describe how a single HTTP request flows through — and is organized inside — a backend server.</p>
+
+<h2>1. The Request Lifecycle Inside the Server</h2>
+
+<p>We've already covered the external request lifecycle (client → server over HTTP). This chapter covers what happens <strong>inside</strong> the server, from the moment the OS forwards the request to a listening port, until a response is sent back.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    A["Client Request"] --> B["Entry Point<br/>(OS forwards request to listening port)"]
+    B --> C["Routing<br/>(maps request to a Handler)"]
+    C --> D["Handler / Controller"]
+    D --> E["Service Layer"]
+    E --> F["Repository Layer"]
+    F --> G[("Database")]
+    G --> F
+    F --> E
+    E --> D
+    D --> H["Response sent to Client"]
+</pre>
+
+<p>There's no hard rule that responsibilities <em>must</em> be split into three layers — a single handler could do everything. This is a <strong>design pattern</strong> adopted for scalability, maintainability, and easier debugging.</p>
+
+<h2>2. Handler / Controller Layer</h2>
+
+<p>Every handler typically receives two objects by default from the runtime/framework (Go, Node.js/Express, Python, etc. all follow this pattern):</p>
+<ul>
+  <li>A <strong>request object</strong> — to extract data from.</li>
+  <li>A <strong>response object</strong> — to send data / set headers back to the client.</li>
+</ul>
+
+<p>You don't create these yourself — the language runtime or framework provides them on every handler invocation.</p>
+
+<h3>Responsibilities of the Handler/Controller, in order:</h3>
+
+<ol>
+  <li>
+    <strong>Extract data from the request</strong> — depending on the HTTP method:
+    <ul>
+      <li>GET → query params</li>
+      <li>POST / PUT / PATCH / DELETE → request body (and/or path params)</li>
+    </ul>
+  </li>
+  <li>
+    <strong>Deserialize / Bind</strong> the JSON payload into the language's native data format:
+    <ul>
+      <li>Go → a <code>struct</code></li>
+      <li>Python → a dictionary or class</li>
+      <li>Rust → a <code>struct</code></li>
+      <li>Node.js — often handled upstream by middleware (e.g. <code>express.json()</code> / <code>body-parser</code>) before it even reaches the handler, since JS has native JSON support.</li>
+    </ul>
+    This step is commonly called <strong>binding</strong>. If deserialization fails, the server responds immediately with <strong>400 Bad Request</strong> and terminates — it does not proceed further.
+  </li>
+  <li>
+    <strong>Validation &amp; Transformation</strong> (covered in the previous chapter) — validate all incoming data (path params, query params, body) as specifically as possible, then optionally transform it:
+    <ul>
+      <li>Example: a <code>GET /books?sort=name|date</code> endpoint. Query params should ideally always be <strong>optional</strong> — a good API design habit. If the client sends no <code>sort</code> value, validation still passes (since it's optional), and the <strong>transformation</strong> step can set a sensible <strong>default</strong> (e.g., <code>sort=date</code>) so downstream layers don't need extra conditional branching.</li>
+    </ul>
+  </li>
+  <li><strong>Call the Service layer</strong>, passing the validated/transformed data plus any contextual info the service might need (e.g., authenticated user ID, permissions).</li>
+  <li><strong>Send the response</strong> — after the service layer returns, the controller decides the appropriate status code (200-series for success, 400 for client errors, 500 for server errors) and sends the response body back to the client.</li>
+</ol>
+
+<blockquote>The controller layer is responsible for <strong>all HTTP-related concerns</strong>: request/response formats, status codes, validation. It effectively controls the data flow between client and server.</blockquote>
+
+<h2>3. Service Layer</h2>
+
+<ul>
+  <li>Should <strong>not</strong> deal with any HTTP-related concerns (status codes, request/response formats). Looking at a service method in isolation, you shouldn't be able to tell it's used behind an API at all.</li>
+  <li>Takes data in, processes it (business logic), returns data out.</li>
+  <li>Can call <strong>one or more repository methods</strong> for database operations.</li>
+  <li>Can also do things that don't touch the database at all — e.g., a service whose only job is sending an email, which then just returns something like <code>{ success: true }</code>.</li>
+  <li><strong>Orchestration</strong>: the service layer can combine/merge results from multiple repository calls, make external API calls, send notifications — anything needed to fulfill the business operation for that API call.</li>
+</ul>
+
+<h2>4. Repository Layer</h2>
+
+<ul>
+  <li>Sole responsibility: take some data, construct and execute a <strong>database query</strong> (insert/fetch/update/delete), and return the result.</li>
+  <li><strong>Single Responsibility Principle applies strictly here:</strong> a repository method should return <strong>one kind of data</strong>.
+    <ul>
+      <li>❌ Don't design one method that returns either "all books" or "a single book" based on an optional parameter.</li>
+      <li>✅ Have a dedicated method for "get all books" and a separate one for "get a single book by ID."</li>
+    </ul>
+  </li>
+</ul>
+
+<table>
+<tr><th>Layer</th><th>Responsibility</th><th>Should NOT do</th></tr>
+<tr><td><strong>Handler / Controller</strong></td><td>Extract, deserialize, validate/transform request data; call service; decide response code &amp; send response</td><td>Business logic, direct DB queries</td></tr>
+<tr><td><strong>Service</strong></td><td>Business logic, orchestration across repositories/external calls</td><td>HTTP status codes, request/response formatting</td></tr>
+<tr><td><strong>Repository</strong></td><td>Construct &amp; execute a single kind of DB query, return result</td><td>Business logic, multiple unrelated responsibilities in one method</td></tr>
+</table>
+
+<h2>5. Middleware</h2>
+
+<p>Middleware functions sit at the <strong>boundaries</strong> between different execution stages of the request lifecycle — e.g., between the entry point and routing, between routing and the handler, or between the handler and the final response.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Entry Point"] --> M1["Middleware<br/>(e.g. CORS)"]
+    M1 --> M2["Middleware<br/>(e.g. Logging)"]
+    M2 --> R["Routing"]
+    R --> M3["Middleware<br/>(e.g. Auth)"]
+    M3 --> M4["Middleware<br/>(e.g. Rate Limit)"]
+    M4 --> H["Handler → Service → Repository"]
+    H --> M5["Middleware<br/>(e.g. Global Error Handling)"]
+    M5 --> C["Response to Client"]
+</pre>
+
+<h3>What a Middleware Receives</h3>
+<p>Like a handler, a middleware gets a <strong>request</strong> object and a <strong>response</strong> object — but additionally gets a third thing: <strong><code>next</code></strong>, a function.</p>
+<ul>
+  <li><code>next()</code> passes execution forward to the next middleware (or to routing, or to the handler) in the chain.</li>
+  <li>Because it has access to the response object, a middleware can <strong>short-circuit</strong> the request and send a response directly — without ever reaching routing or the handler (e.g., failed authentication, CORS rejection, rate limit exceeded).</li>
+  <li><strong>All middleware is optional</strong> — you can skip straight from routing to the handler with zero middleware in between if your app doesn't need any.</li>
+</ul>
+
+<h3>Why Use Middleware? (Same reason we use functions)</h3>
+<ul>
+  <li><strong>Avoid code duplication</strong> — common operations (security, logging, auth, rate limiting) that need to run for <em>every</em> request/endpoint are written once, not copy-pasted into every handler.</li>
+  <li>A large backend can have hundreds/thousands of endpoints/handlers — middleware centralizes cross-cutting concerns instead of repeating them per-handler.</li>
+</ul>
+
+<h3>⚠️ Order of Middleware Matters</h3>
+<p>Execution flows linearly, one middleware calling <code>next()</code> to hand off to the next. Where you place a middleware in the chain determines what it can and cannot see/affect.</p>
+
+<h3>Common Middleware Examples</h3>
+
+<table>
+<tr><th>Middleware</th><th>Purpose</th><th>Typical Position</th></tr>
+<tr><td><strong>CORS</strong></td><td>Checks request <code>Origin</code>; if it matches an allowed frontend origin, adds headers permitting the browser to allow the response (same-origin policy workaround)</td><td>Very early — reject/allow before wasting further resources</td></tr>
+<tr><td><strong>Security Headers</strong></td><td>Adds headers like Content-Security-Policy for every request</td><td>Early</td></tr>
+<tr><td><strong>Authentication</strong></td><td>Extracts token (JWT/session ID) from request, verifies credentials. On failure → immediate <strong>401 Unauthorized</strong>, request terminated. On success → stores user ID/role in <strong>request context</strong>, then calls <code>next()</code></td><td>After CORS/logging, before business logic</td></tr>
+<tr><td><strong>Rate Limiting</strong></td><td>Tracks requests per IP/client within a time window; if the threshold is exceeded (e.g., "30 requests / 2 seconds") → <strong>429 Too Many Requests</strong></td><td>Early, before handler</td></tr>
+<tr><td><strong>Logging / Monitoring</strong></td><td>Logs method, path, query params, body, etc. for debugging/auditing</td><td>Early</td></tr>
+<tr><td><strong>Global Error Handling</strong></td><td>Catches unstructured errors from anywhere in the app, classifies as client (400) or server (500) error, returns a properly structured error response</td><td><strong>Last</strong> — must run after everything else so it can catch errors from any prior stage</td></tr>
+<tr><td><strong>Compression</strong></td><td>Compresses large JSON responses (e.g., gzip) for transit; browsers decompress automatically</td><td>Near the response-sending end</td></tr>
+<tr><td><strong>Data Parsing / Validation</strong></td><td>Can delegate serialization/deserialization or validation/transformation to a shared middleware instead of repeating it per-handler (implementation choice, depends on codebase conventions)</td><td>Before the handler</td></tr>
+</table>
+
+<blockquote><strong>Why Global Error Handling must be last:</strong> errors can occur at any point in the chain — in a middleware, the handler, or the service layer. Only a middleware positioned at the very end of the chain can guarantee it has a chance to intercept and format <em>any</em> error that occurred anywhere upstream before the response is finally sent.</blockquote>
+
+<p><strong>Typical ordering</strong> in many real backends: CORS → Logging → Authentication → (business logic: Handler/Service/Repository) → Global Error Handling (last).</p>
+
+<h2>6. Request Context</h2>
+
+<p><strong>Request Context</strong> = a storage/state <strong>scoped to a single request</strong>, accessible across all middleware and handler boundaries for that request's lifetime. Implementation details vary by language/framework, but the concept is universal (Go's <code>context.Context</code>, Node's request-scoped objects, Python frameworks' context objects, etc.).</p>
+
+<p>Typically a simple key-value store, letting different execution stages (middlewares, handlers) share data <strong>without tightly coupling</strong> them together (i.e., without having to pass values explicitly through every function signature).</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    subgraph Ctx["Request Context (shared per-request key-value store)"]
+        direction TB
+        K1["userId"]
+        K2["role"]
+        K3["requestId"]
+    end
+    AuthMW["Authentication Middleware<br/>verifies token, sets userId + role"] -->|writes to| Ctx
+    Ctx -->|reads from| Handler["Handler<br/>e.g. POST /books"]
+    Ctx -->|reads from| LoggingMW["Logging / Downstream calls"]
+</pre>
+
+<h3>Common Use Cases</h3>
+
+<ol>
+  <li>
+    <strong>Passing authenticated user info downstream.</strong> The authentication middleware verifies the token/credentials, extracts <code>userId</code> and <code>role</code>, and stores them in the request context. Later, the handler reads <code>userId</code> from the context — <strong>not</strong> from the client payload — when inserting a record (e.g., a new book row tied to a user).
+    <blockquote>Why not trust a <code>userId</code> sent by the client? A malicious client could send someone <strong>else's</strong> user ID in the payload to perform unauthorized operations on their behalf. Always derive identity from verified authentication data stored in the context, not from client-supplied fields.</blockquote>
+  </li>
+  <li>
+    <strong>Request tracing / correlation IDs.</strong> An early middleware generates a unique ID (e.g., a UUID) and stores it in the context as the <code>requestId</code>. This ID can then be used in logs and forwarded to downstream microservice calls (e.g., in an <code>X-Request-Id</code> header), making it possible to trace a single request's full path across services when debugging or auditing.
+  </li>
+  <li>
+    <strong>Cancellation / abort signals and deadlines.</strong> Contexts can carry cancellation signals and timeouts so that downstream/external service calls don't hang indefinitely if the parent request should be aborted.
+  </li>
+</ol>
+
+<h2>7. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>Handler/Controller</strong>: extracts &amp; deserializes ("binds") request data, runs validation/transformation, calls the service layer, and owns the HTTP response (status code + body). All HTTP concerns live here.</li>
+  <li><strong>Service</strong>: pure business logic, no HTTP awareness; orchestrates one or more repository calls and/or external actions (emails, webhooks, other API calls).</li>
+  <li><strong>Repository</strong>: single-responsibility DB access — one method, one kind of operation/return type. Never overload a method to conditionally return different shapes of data.</li>
+  <li>This three-layer split isn't mandatory — it's a <strong>design pattern</strong> for scalability, maintainability, and testability.</li>
+  <li><strong>Middleware</strong> = functions that run at boundaries in the request lifecycle, receiving <code>(request, response, next)</code>. They exist to eliminate duplicated cross-cutting logic (security, logging, auth, rate limiting) across many handlers.</li>
+  <li>Middleware can <strong>short-circuit</strong> the request (send a response directly) without reaching the handler — e.g., failed CORS check, failed auth, rate limit exceeded.</li>
+  <li><strong>Order of middleware matters</strong> — e.g., Global Error Handling middleware must be <strong>last</strong> so it can catch errors from every prior stage.</li>
+  <li><strong>Request Context</strong> = a per-request shared key-value state accessible to all middleware/handlers in that request's lifecycle, used to decouple components (e.g., passing authenticated <code>userId</code>/<code>role</code>, request IDs for tracing, or cancellation signals) without threading parameters through every function call explicitly.</li>
+  <li><strong>Security principle:</strong> derive user identity/permissions from the authenticated context (set by auth middleware), never trust identity fields sent directly by the client in the request body.</li>
+</ul>
+
+<h2>8. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What are the responsibilities of the Handler/Controller, Service, and Repository layers, and how are they different?</li>
+  <li>Why should the service layer have no knowledge of HTTP-specific concepts like status codes?</li>
+  <li>Why should a repository method only return one kind/shape of data?</li>
+  <li>What is middleware, and what three things does it typically receive?</li>
+  <li>How does the <code>next()</code> function work, and what happens if a middleware doesn't call it?</li>
+  <li>Why must global error-handling middleware be placed last in the chain?</li>
+  <li>Give examples of common middleware and explain why each is implemented as middleware rather than inline in a handler.</li>
+  <li>What is a request context, and what problem does it solve?</li>
+  <li>Why should you take the user ID from the request context (set during authentication) instead of from the client-supplied request body?</li>
+  <li>How would you implement request tracing across microservices using request context?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="https://claude.ai/artifact/42iPzavZfhBEeAYk21Qdtk">← Validations &amp; Transformations</a>
+  <a href="https://claude.ai/artifact/LFVNr8SeVpxhHspJu78Wef">Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>
