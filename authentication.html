@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Authentication & Authorization — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  h4 { font-size: 16px; margin-top: 22px; color: #ffffff; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="serialization.html">← Serialization &amp; Deserialization</a>
+  <a href="index.html">Chapters</a>
+</nav>
+
+<h1>Authentication &amp; Authorization — Interview Notes</h1>
+
+<h2>1. Core Definitions (2-sentence summary)</h2>
+
+<table>
+<tr><th>Term</th><th>Question it answers</th><th>Meaning</th></tr>
+<tr><td><strong>Authentication (AuthN)</strong></td><td><em>"Who are you?"</em></td><td>Mechanism to assign/verify an <strong>identity</strong> to a subject, in a given context (platform, OS, device, etc.)</td></tr>
+<tr><td><strong>Authorization (AuthZ)</strong></td><td><em>"What can you do?"</em></td><td>Determines the <strong>permissions/capabilities</strong> a subject has in that context</td></tr>
+</table>
+
+<blockquote>Authentication always happens <strong>before</strong> authorization — you must know <em>who</em> someone is before deciding <em>what</em> they can do.</blockquote>
+
+<h2>2. Historical Evolution of Authentication (context, not usually asked directly but good to know)</h2>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+timeline
+    title Evolution of Authentication
+    Pre-Industrial : Implicit trust (village elder vouching, handshake deals)
+    Medieval Period : Wax seals — "something you have" (first forgeries = first bypass attacks)
+    Industrial Revolution : Telegraph passphrases — "something you know" (shared static secrets)
+    1961 (MIT CTSS) : First digital passwords (stored in plaintext — leaked via printed file!)
+    1970s : Diffie-Hellman asymmetric crypto, PKI, Kerberos (ticket-based auth)
+    1990s : MFA (know + have + are), biometrics
+    21st Century : OAuth, JWT, Zero Trust, WebAuthn (passwordless)
+    Emerging/Future : Decentralized identity (blockchain), behavioral biometrics, post-quantum crypto
+</pre>
+
+<p>Key evolution of trust principles:</p>
+<ol>
+  <li><strong>Something you have</strong> (seal, smart card, OTP device)</li>
+  <li><strong>Something you know</strong> (password, PIN, passphrase)</li>
+  <li><strong>Something you are</strong> (biometrics)</li>
+  <li><strong>MFA</strong> = combining 2 or more of the above</li>
+</ol>
+
+<p><strong>Why plaintext passwords are bad:</strong> MIT CTSS (1961) incident — a password file was printed in plaintext and exposed → birth of secure password storage → <strong>hashing</strong> (irreversible, fixed-length output regardless of input length; same input always produces same output).</p>
+
+<h2>3. Three Foundational Building Blocks</h2>
+
+<p>Before diving into auth types, three recurring concepts:</p>
+
+<h3>A. Sessions</h3>
+<ul>
+  <li>HTTP is <strong>stateless by design</strong> — every request is independent, server remembers nothing between requests.</li>
+  <li>This was fine for static content but broke down once the web needed <strong>stateful interactions</strong> (shopping carts, staying logged in).</li>
+  <li><strong>Session mechanism:</strong>
+    <ol>
+      <li>User logs in → server creates a unique <strong>session ID</strong>, stores it + user data (role, cart, etc.) in a persistent store (DB or Redis/Memcached — in-memory stores are faster).</li>
+      <li>Session ID sent to client as a <strong>cookie</strong>.</li>
+      <li>Every subsequent request auto-includes the cookie → server looks up session ID in the store → retrieves user context.</li>
+      <li>Sessions are <strong>short-lived</strong> (expiry) — new session generated after expiry.</li>
+    </ol>
+  </li>
+  <li><strong>Evolution of session storage:</strong> file-based → database-backed → distributed in-memory stores (Redis, Memcached) for scalability.</li>
+</ul>
+
+<h3>B. JWT (JSON Web Token)</h3>
+<ul>
+  <li>Emerged because <strong>stateful sessions don't scale well</strong> in distributed/microservice systems:
+    <ul>
+      <li>Cost of storing session data for millions of users.</li>
+      <li><strong>Replication/sync latency</strong> across regions/servers.</li>
+    </ul>
+  </li>
+  <li>Formalized ~2015. <strong>Stateless mechanism for transferring claims</strong> between parties.</li>
+  <li><strong>Structure:</strong> <code>header.payload.signature</code> (base64-encoded, dot-separated)</li>
+</ul>
+
+<table>
+<tr><th>Part</th><th>Contains</th></tr>
+<tr><td><strong>Header</strong></td><td>Metadata — signing algorithm used</td></tr>
+<tr><td><strong>Payload</strong></td><td>Claims — <code>sub</code> (user ID), <code>iat</code> (issued-at time), plus optional fields like name, role</td></tr>
+<tr><td><strong>Signature</strong></td><td>Generated using a <strong>secret key</strong>; verifies integrity/tamper-proofing</td></tr>
+</table>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Header<br/>alg, type"] --> D["."]
+    B["Payload<br/>sub, iat, role, name"] --> D
+    C["Signature<br/>HMAC/RSA of header+payload with secret"] --> D
+    D --> E["base64url encoded JWT string"]
+</pre>
+
+<p><strong>Advantages of JWT:</strong></p>
+<ul>
+  <li><strong>Statelessness</strong> → no server-side storage needed to verify identity.</li>
+  <li><strong>Scalability</strong> → works great across microservices; any server with the shared secret can verify the token independently (no shared session store needed).</li>
+  <li><strong>Portability</strong> → compact, URL-safe, can go in headers, cookies, or query params.</li>
+</ul>
+
+<p><strong>Disadvantages of JWT:</strong></p>
+<ul>
+  <li><strong>No revocation mechanism</strong> — a token is valid until it expires; can't kill it early without changing the server secret (which logs out <em>everyone</em>).</li>
+  <li><strong>Token theft = impersonation</strong> — whoever holds the JWT can act as that user, with no built-in way to check it's "still legitimate" mid-lifetime.</li>
+</ul>
+
+<p><strong>Hybrid approach (mitigation):</strong> Keep JWT verification stateless, but maintain a <strong>blacklist</strong> in persistent storage (DB/Redis) for revoked tokens — checked in addition to signature verification. (Trade-off: this reintroduces a storage lookup, partially defeating the "pure stateless" benefit — a common interview discussion point.)</p>
+
+<blockquote>Practical advice from the video: for production systems, prefer a mature <strong>auth provider</strong> (Auth0, Clerk, etc.) unless you're very confident in your own implementation. Build your own only to learn.</blockquote>
+
+<h3>C. Cookies</h3>
+<ul>
+  <li>A way for the <strong>server to store a piece of data in the client's browser</strong>.</li>
+  <li>Browser security model: a cookie set by one server/domain is only sent back to that same server — not visible to other servers.</li>
+  <li>Typical usage in auth: server sets a cookie containing the session ID or JWT after successful login → browser auto-attaches it to every subsequent request to that server.</li>
+  <li><strong>HTTP-only cookies</strong>: cannot be accessed via JavaScript (mitigates XSS token theft).</li>
+</ul>
+
+<h2>4. Types of Authentication</h2>
+
+<h3>4.1 Stateful Authentication</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client (Browser)
+    participant S as Server
+    participant R as Redis/DB (Session Store)
+
+    C->>S: username + password
+    S->>S: Validate credentials
+    S->>R: Store session ID + user data
+    S-->>C: Set-Cookie: sessionId (HTTP-only)
+    Note over C,S: Subsequent requests
+    C->>S: Request + Cookie(sessionId)
+    S->>R: Look up sessionId
+    R-->>S: User data / validity
+    S-->>C: Authorized response
+</pre>
+
+<ul>
+  <li>Session ID can be a random cryptographic string or even a JWT — implementation detail.</li>
+  <li><strong>Pros:</strong> centralized control, real-time visibility into active sessions, easy to revoke/log out a user instantly.</li>
+  <li><strong>Cons:</strong> limited horizontal scalability, operational complexity in distributed/multi-region systems (replication latency).</li>
+</ul>
+
+<h3>4.2 Stateless Authentication (JWT-based)</h3>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: username + password
+    S->>S: Validate credentials
+    S->>S: Sign JWT with secret key (user ID, role, etc.)
+    S-->>C: JWT token
+    Note over C,S: Subsequent requests
+    C->>S: Authorization: Bearer JWT
+    S->>S: Verify signature with secret key
+    S-->>C: Authorized response (or 401/403)
+</pre>
+
+<ul>
+  <li><strong>Pros:</strong> scalability, no session-store dependency, ideal for distributed systems and mobile apps (no cookies needed).</li>
+  <li><strong>Cons:</strong> revocation is hard; token theft = impersonation until expiry.</li>
+</ul>
+
+<h3>4.3 API Key–Based Authentication</h3>
+<ul>
+  <li>Use case: <strong>machine-to-machine (M2M)</strong> communication — no human/UI involved.</li>
+  <li>Example: your backend calling OpenAI's API programmatically instead of using the ChatGPT UI.</li>
+  <li>Workflow: generate a key in a dashboard → store it securely (env variable/secrets manager) → attach to each request (commonly a header) → identifies caller, quota, plan, permissions.</li>
+  <li><strong>Ideal for:</strong> server-to-server calls, programmatic/automated access, single-purpose API clients.</li>
+  <li><strong>Advantage:</strong> simple to generate and use; no login/session dance needed.</li>
+</ul>
+
+<h3>4.4 OAuth 2.0 / OpenID Connect (OIDC)</h3>
+
+<h4>The problem OAuth solves: Delegation</h4>
+<ul>
+  <li>One platform needs access to another platform's resources on a user's behalf (e.g., a travel app reading your Gmail for flight tickets, a social app importing your Google contacts).</li>
+  <li><strong>Bad old solution:</strong> sharing your actual password → no way to limit scope, no way to revoke without changing password everywhere.</li>
+</ul>
+
+<h4>OAuth 1.0 (2007) — solved delegation via tokens (not passwords)</h4>
+
+<p><strong>Key roles:</strong></p>
+<table>
+<tr><th>Role</th><th>Description</th><th>Example</th></tr>
+<tr><td><strong>Resource Owner</strong></td><td>The user who owns the data</td><td>You</td></tr>
+<tr><td><strong>Client</strong></td><td>The app requesting access</td><td>Facebook</td></tr>
+<tr><td><strong>Resource Server</strong></td><td>Where the data lives</td><td>Google</td></tr>
+<tr><td><strong>Authorization Server</strong></td><td>Issues the token</td><td>Google's auth server</td></tr>
+</table>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant U as User (Resource Owner)
+    participant C as Client (e.g. Facebook)
+    participant AS as Authorization Server (Google)
+    participant RS as Resource Server (Google Contacts)
+
+    C->>AS: Redirect user to authorize
+    U->>AS: Login + grant permission
+    AS-->>C: Token
+    C->>RS: Access resource using token
+    RS-->>C: Contacts data
+</pre>
+
+<p>Limitation: cryptographic-signature-based, complex to implement correctly → error-prone.</p>
+
+<h4>OAuth 2.0 (~2010) — simplification</h4>
+<ul>
+  <li>Introduced <strong>bearer tokens</strong> (simpler, but relies more on transport security like HTTPS).</li>
+  <li>Introduced multiple <strong>flows</strong> for different app types:</li>
+</ul>
+
+<table>
+<tr><th>Flow</th><th>Use case</th></tr>
+<tr><td><strong>Authorization Code Flow</strong></td><td>Server-side web apps</td></tr>
+<tr><td><strong>Implicit Flow</strong></td><td>Browser-based apps (now discouraged — security risks)</td></tr>
+<tr><td><strong>Client Credentials Flow</strong></td><td>Machine-to-machine (no user involved)</td></tr>
+<tr><td><strong>Device Code Flow</strong></td><td>Input-constrained devices (e.g., Smart TVs)</td></tr>
+</table>
+
+<blockquote>Important: <strong>OAuth 2.0 solves authorization (delegation), NOT authentication.</strong> It doesn't inherently answer "who is this user" in a standard way.</blockquote>
+
+<h4>OpenID Connect (OIDC, ~2014) — adds authentication on top of OAuth 2.0</h4>
+<ul>
+  <li>Introduces the <strong>ID Token</strong> — a JWT containing user identity info (user ID, issued-at, issuer, name, email, etc.).</li>
+  <li>This is the tech behind <strong>"Sign in with Google/Facebook/Discord."</strong></li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+sequenceDiagram
+    participant U as User
+    participant C as Client (e.g. Notes App)
+    participant AS as Authorization Server (Google)
+
+    U->>C: Click "Sign in with Google"
+    C->>AS: Redirect to Google login
+    U->>AS: Login + grant permissions
+    AS-->>C: Authorization Code (+ optional ID Token)
+    C->>AS: Exchange code for Access Token + ID Token
+    AS-->>C: Access Token (JWT) + ID Token (JWT)
+    C->>C: Decode ID Token to get user identity
+    Note over C: Client can now call Google APIs<br/>on user's behalf using Access Token
+</pre>
+
+<ul>
+  <li><strong>ID Token</strong> → answers "who is this user" (authentication).</li>
+  <li><strong>Access Token</strong> → answers "what can the client do on the user's behalf" (authorization/delegation).</li>
+</ul>
+
+<h2>5. When to Use Which Authentication Type (Quick Decision Guide)</h2>
+
+<table>
+<tr><th>Type</th><th>Best for</th></tr>
+<tr><td><strong>Stateful (session-based)</strong></td><td>Traditional web apps / SaaS with server-rendered or single-domain apps; need real-time revocation &amp; session visibility</td></tr>
+<tr><td><strong>Stateless (JWT)</strong></td><td>APIs, distributed/microservice systems, mobile apps (no cookies)</td></tr>
+<tr><td><strong>API Key</strong></td><td>Server-to-server / machine-to-machine / programmatic single-purpose API access</td></tr>
+<tr><td><strong>OAuth 2.0 / OIDC</strong></td><td>Third-party login ("Sign in with X") and delegated access to another platform's resources</td></tr>
+</table>
+
+<blockquote>Real-world nuance: many systems use a <strong>hybrid approach</strong> — stateful sessions/cookies for the main web app (browser clients), stateless JWTs for mobile apps/third-party API integrations.</blockquote>
+
+<h2>6. Authorization Deep Dive</h2>
+
+<h3>RBAC — Role-Based Access Control</h3>
+<ul>
+  <li>Users are assigned <strong>roles</strong> (e.g., <code>user</code>, <code>admin</code>, <code>moderator</code>).</li>
+  <li>Each role has a defined set of <strong>permissions</strong> on specific resources (read/write/delete).</li>
+  <li>Can be as granular as needed (different roles have different permissions on different resource types).</li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    A["User Signs Up"] --> B["Server assigns Role<br/>e.g. user / admin"]
+    B --> C["Subsequent Request<br/>with Session ID / JWT"]
+    C --> D["Server deduces Role<br/>from token or DB lookup"]
+    D --> E{"Role has permission<br/>for this resource?"}
+    E -->|Yes| F["Allow — proceed with request"]
+    E -->|No| G["403 Forbidden"]
+</pre>
+
+<ul>
+  <li>Example: a notes app's "Dead Zone" (soft-deleted notes) may only be accessible to <code>admin</code> role, not regular <code>user</code> role.</li>
+  <li><strong>Anti-pattern to avoid:</strong> hardcoding a secret "god-mode" string sent with API calls to grant special access — insecure (leak = full compromise) and unscalable (hard to share/manage/revoke per person). RBAC solves this properly via structured roles/permissions.</li>
+</ul>
+
+<h2>7. Security Best Practices for Auth Flows (commonly asked in interviews)</h2>
+
+<h3>7.1 Generic Error Messages</h3>
+<ul>
+  <li><strong>Never</strong> reveal specific reasons for auth failure:
+    <ul>
+      <li>❌ "User not found"</li>
+      <li>❌ "Incorrect password"</li>
+      <li>❌ "Account locked due to too many attempts"</li>
+    </ul>
+  </li>
+  <li><strong>Why:</strong> each of these gives an attacker a clue (e.g., confirms a username exists, letting them focus brute-force efforts on the password).</li>
+  <li>✅ Always return a <strong>generic message</strong>, e.g., <code>"Authentication failed"</code>, regardless of which step failed.</li>
+</ul>
+
+<h3>7.2 Timing Attacks</h3>
+<ul>
+  <li>Typical auth flow order: (1) find user → (2) check if locked → (3) hash &amp; compare password.</li>
+  <li><strong>Problem:</strong> if the username doesn't exist, the request fails fast (step 1). If the username exists but the password is wrong, it fails later (step 3, after a hashing operation) — hashing takes measurably longer.</li>
+  <li>This <strong>time difference is a side-channel</strong> — attackers can measure response time to infer whether a username is valid, even with generic error messages.</li>
+  <li><strong>Mitigations:</strong>
+    <ol>
+      <li><strong>Constant-time comparison functions</strong> for password/hash comparison (execution time independent of input similarity).</li>
+      <li><strong>Simulate artificial delay</strong> (e.g., <code>setTimeout</code> in Node, <code>time.sleep</code> in Go) on the fast-fail path so all responses take roughly the same time regardless of which step failed.</li>
+    </ol>
+  </li>
+</ul>
+
+<h2>8. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>AuthN = who you are; AuthZ = what you can do.</strong> Always in that order.</li>
+  <li><strong>HTTP is stateless by design</strong> — sessions were introduced to add memory/continuity for the client.</li>
+  <li><strong>Sessions vs JWT</strong> is fundamentally a <strong>stateful vs stateless</strong> trade-off:
+    <ul>
+      <li>Sessions → server-side lookup required, easy revocation, harder to scale across distributed systems.</li>
+      <li>JWT → self-contained, no lookup needed, scales well, but revocation is the classic pain point.</li>
+    </ul>
+  </li>
+  <li><strong>Hybrid JWT + blacklist</strong> is a common real-world compromise — know the trade-off it reintroduces (a storage lookup).</li>
+  <li><strong>Cookies</strong> are the delivery mechanism for both session IDs and JWTs in browser-based apps; use <code>HttpOnly</code> to block JS access (XSS mitigation).</li>
+  <li><strong>API keys</strong> are for machine-to-machine access, not user-facing login.</li>
+  <li><strong>OAuth solves delegation</strong> (accessing another platform's resources without sharing your password) — it does <strong>not</strong> solve authentication by itself.</li>
+  <li><strong>OpenID Connect (OIDC) = OAuth 2.0 + ID Token (JWT)</strong> — this is what "Sign in with Google" actually uses; it adds identity/authentication on top of OAuth's authorization/delegation model.</li>
+  <li><strong>OAuth 2.0 roles:</strong> Resource Owner (user), Client (requesting app), Resource Server (holds data), Authorization Server (issues tokens).</li>
+  <li><strong>OAuth 2.0 flows:</strong> Authorization Code (server apps), Implicit (deprecated, browser apps), Client Credentials (M2M), Device Code (input-constrained devices, e.g., Smart TVs).</li>
+  <li><strong>RBAC</strong> is the standard authorization model: roles → permissions → resources.</li>
+  <li><strong>Never leak auth-failure specifics</strong> in error messages — always generic ("Authentication failed").</li>
+  <li><strong>Timing attacks</strong> are a real, often-overlooked vulnerability — mitigate with constant-time comparisons or simulated delays.</li>
+  <li><strong>Practical advice:</strong> build your own auth to <em>learn</em>, but use a managed provider (Auth0, Clerk, etc.) in production unless you're very confident in your security implementation.</li>
+</ul>
+
+<h2>9. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What's the difference between authentication and authorization?</li>
+  <li>Why is HTTP stateless, and how do sessions solve that?</li>
+  <li>Compare stateful (session) vs stateless (JWT) authentication — pros, cons, and when to use each.</li>
+  <li>What are the three parts of a JWT? What's stored in each?</li>
+  <li>Why is revoking a JWT hard? How would you design around it (hybrid blacklist approach)?</li>
+  <li>What problem does OAuth solve? Why couldn't we just share passwords?</li>
+  <li>What are the four roles in OAuth 2.0?</li>
+  <li>What's the difference between OAuth 2.0 and OpenID Connect? Why was OIDC needed on top of OAuth?</li>
+  <li>List OAuth 2.0's grant flows and when each is used (auth code, implicit, client credentials, device code).</li>
+  <li>What is RBAC, and how would you design a permission system for a multi-tenant app?</li>
+  <li>Why should authentication error messages be generic instead of specific?</li>
+  <li>What is a timing attack in the context of login, and how do you defend against it?</li>
+  <li>When would you use API key authentication instead of OAuth or JWT?</li>
+  <li>What's an HTTP-only cookie, and why does it matter for session/token security?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="https://claude.ai/artifact/MJoNKRBS52vptPeQbap2Vt">← Serialization &amp; Deserialization</a>
+  <a href="https://claude.ai/artifact/LFVNr8SeVpxhHspJu78Wef">Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

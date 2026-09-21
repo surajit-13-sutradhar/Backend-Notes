@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backend Interview Notes — Chapters</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1 {
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 28px;
+    border-bottom: 1px solid #444;
+    padding-bottom: 10px;
+    margin-bottom: 30px;
+  }
+  p { margin: 12px 0; }
+  ol.chapters {
+    list-style: decimal;
+    padding-left: 28px;
+    margin: 0;
+  }
+  ol.chapters li {
+    margin: 0;
+    border-bottom: 1px solid #2c2c2c;
+  }
+  ol.chapters li:last-child { border-bottom: none; }
+  ol.chapters a {
+    display: block;
+    color: #9ecbff;
+    text-decoration: none;
+    padding: 16px 4px;
+    font-size: 19px;
+  }
+  ol.chapters a:hover { text-decoration: underline; }
+  .desc {
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    color: #999999;
+    display: block;
+    margin-top: 2px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Backend Interview Notes- Chapters</h1>
+
+<p>Word-for-word notes from the video series, one chapter per page.</p>
+
+<ol class="chapters">
+  <li>
+    <a href="serialization.html">
+      Serialization &amp; Deserialization
+      <span class="desc">JSON, OSI model context, client/server data flow</span>
+    </a>
+  </li>
+  <li>
+    <a href="authentication.html">
+      Authentication &amp; Authorization
+      <span class="desc">Sessions, JWT, cookies, OAuth 2.0 / OIDC, RBAC</span>
+    </a>
+  </li><li>
+    <a href="validations-transformations.html">
+      Validations &amp; Transformations
+      <span class="desc">Where to validate, syntactic/semantic/type checks, casting query params</span>
+    </a>
+  </li>
+
+</ol>
+
+</body>
+</html>

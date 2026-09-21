@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Validations & Transformations — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="authentication.html">← Authentication &amp; Authorization</a>
+  <a href="index.html">Chapters</a>
+</nav>
+
+<h1>Validations &amp; Transformations — Interview Notes</h1>
+
+<p>This chapter is less about a single concept and more about a set of <strong>rules/guidelines</strong> to follow when designing APIs — centered on <strong>data integrity</strong> and <strong>security</strong>.</p>
+
+<h2>1. Where This Fits in a Typical Backend Architecture</h2>
+
+<p>A typical backend has layered execution:</p>
+
+<table>
+<tr><th>Layer</th><th>Responsibility</th></tr>
+<tr><td><strong>Repository Layer</strong> (bottom)</td><td>Database connections, query execution (inserts/deletes/updates), works with relational DBs, Redis, or any persistent storage</td></tr>
+<tr><td><strong>Service Layer</strong> (middle)</td><td>Executes business logic — may call one or more repository methods, send notifications/emails, make webhook calls, etc.</td></tr>
+<tr><td><strong>Controller Layer</strong> (top)</td><td>Calls the appropriate service method for a given API; handles all HTTP-related concerns (status codes, response format, and — the focus of this chapter — validations)</td></tr>
+</table>
+
+<p>Why separate controller from service? We want to keep <strong>HTTP-related concerns</strong> (status codes, request/response formats, validation) isolated from the actual business logic, so the service layer stays clean and reusable regardless of transport (HTTP, gRPC, etc).</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    Client["Client (sends JSON payload / query params / path params / headers)"] --> Route["Route Matching"]
+    Route --> Controller["Controller Layer<br/>← Validation & Transformation Pipeline runs HERE"]
+    Controller --> Service["Service Layer<br/>(business logic)"]
+    Service --> Repository["Repository Layer<br/>(DB queries)"]
+    Repository --> DB[("Database")]
+</pre>
+
+<p><strong>Key point:</strong> Validation and transformation happen at the entry point — <em>after</em> route matching, but <em>before</em> any significant controller logic runs (before calling service methods or executing business logic).</p>
+
+<h2>2. Why Validate at the Entry Point?</h2>
+
+<p>The idea: whatever data a client sends — JSON payload, query parameters, path parameters, headers — must be checked to ensure it's in the <strong>exact format the API expects</strong> before anything meaningful happens with it.</p>
+
+<p>Example requirement: an API expects a JSON body with a field <code>name</code> that must be a string between 5–100 characters.</p>
+
+<p>The validation pipeline (a reusable middleware/utility function backed by a schema) checks, step by step:</p>
+<ol>
+  <li>Does the field <code>name</code> exist? If not → error: <em>"name field is required."</em></li>
+  <li>Is it the correct type (string)? If not → error: <em>"expected string, received boolean"</em> (or whatever type was sent).</li>
+  <li>Does it satisfy length constraints (5–100 chars)? If not → error about length.</li>
+</ol>
+
+<h3>What happens without validation? (Failure scenario)</h3>
+
+<p>Imagine no validation pipeline exists, and a client sends <code>{"name": 0}"</code> (a number, not a string) for an API that creates a "book" row.</p>
+
+<ul>
+  <li>Data flows unchecked: Controller → Service → Repository → Database.</li>
+  <li>The database column <code>name</code> is defined as <code>TEXT NOT NULL</code> (e.g., in Postgres).</li>
+  <li>Postgres enforces its own type constraints and the insert **fails** because a number was provided where text was expected.</li>
+  <li>Depending on error handling, the client gets a generic <strong>500 Internal Server Error</strong> — a poor user experience, since it gives no indication of what actually went wrong.</li>
+</ul>
+
+<p><strong>With validation at the entry point:</strong> the same bad input is caught immediately and the client receives a clear <strong>400 Bad Request</strong> with an explanation of exactly what's wrong — before the request ever touches the service or repository layers.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Client sends invalid data<br/>e.g. name: 0"] --> B{"Validation Pipeline"}
+    B -->|Fails| C["400 Bad Request<br/>clear error message"]
+    B -->|Passes| D["Controller → Service → Repository → DB"]
+    D -->|"No validation existed"| E["DB rejects insert<br/>(type mismatch)"]
+    E --> F["500 Internal Server Error<br/>poor UX, unclear cause"]
+</pre>
+
+<h2>3. Demo Recap (Syntactic Example)</h2>
+
+<p>API: <code>POST /api/valid/syntactic</code></p>
+<ul>
+  <li>Sending an empty JSON payload → error array listing three required fields: <code>email</code>, <code>phone</code>, <code>date</code>.</li>
+  <li>Providing dummy values → errors: <em>invalid email format</em>, and <em>phone expected string but received number</em>.</li>
+  <li>Fixing the email (e.g. <code>test@test.com</code>) and quoting the phone as a string → request succeeds with <strong>200 OK</strong>.</li>
+</ul>
+
+<h2>4. Three Types of Validation</h2>
+
+<table>
+<tr><th>Type</th><th>Checks whether…</th><th>Examples</th></tr>
+<tr>
+  <td><strong>Syntactic</strong></td>
+  <td>The data follows the correct <em>structure/pattern</em></td>
+  <td>Email format (<code>local@domain.tld</code>), phone number structure (country code + digits), date format (e.g. <code>YYYY-MM-DD</code>)</td>
+</tr>
+<tr>
+  <td><strong>Semantic</strong></td>
+  <td>The data <em>makes logical sense</em></td>
+  <td>Date of birth cannot be in the future; age of 365 doesn't make sense; age must realistically be between 1–120</td>
+</tr>
+<tr>
+  <td><strong>Type</strong></td>
+  <td>The data is of the <em>correct data type</em></td>
+  <td>Is this field a string, number, boolean, array, or nested object as expected?</td>
+</tr>
+</table>
+
+<h3>4.1 Syntactic Validation — Example</h3>
+<p>Validating an email, phone number, or date against their expected structural pattern (e.g., <code>name@domain.tld</code> for email).</p>
+
+<h3>4.2 Semantic Validation — Example</h3>
+<p>API expects <code>dateOfBirth</code> and <code>age</code>:</p>
+<ul>
+  <li>Setting <code>dateOfBirth</code> to a future year (e.g. 2026 when "today" is 2025) → error: <em>"date of birth cannot be in the future."</em></li>
+  <li>Setting <code>age</code> to 430 → error: <em>"number must be less than or equal to 120."</em></li>
+</ul>
+<p>Semantic validation checks that data is not just correctly typed/structured, but <strong>logically valid</strong>.</p>
+
+<h3>4.3 Complex / Cross-Field Validation — Example</h3>
+<p>API expects <code>password</code>, <code>passwordConfirmation</code>, and <code>married</code>:</p>
+<ul>
+  <li><code>password</code> must be at least 8 characters.</li>
+  <li><code>passwordConfirmation</code> must exactly match <code>password</code> — otherwise error: <em>"passwords don't match."</em></li>
+  <li>If <code>married</code> is <code>true</code>, an additional field <code>partner</code> (the partner's name) becomes <strong>required</strong>. If <code>married</code> is <code>false</code>, <code>partner</code> is optional.</li>
+</ul>
+<p>This shows validation pipelines can express <strong>conditional/cross-field business rules</strong>, not just single-field checks.</p>
+
+<h3>4.4 Type Validation — Example</h3>
+<p>API expects: <code>stringField</code>, <code>numberField</code>, <code>arrayField</code>, <code>boolField</code>.</p>
+<ul>
+  <li>Sending a string where a number is expected → <em>"expected number, received string."</em></li>
+  <li>Sending a string where an array is expected → <em>"expected array, received string."</em></li>
+  <li>Array elements can have their <strong>own</strong> type constraints — e.g., an array of numbers sent where an array of strings was required → error pinpointing the exact index: <em>"element 0: expected string, received number."</em></li>
+</ul>
+
+<h2>5. Transformation</h2>
+
+<p><strong>Transformation</strong> = converting/casting data into a desired format, either before validation (so it *can* be validated correctly) or after, to prepare it for the service layer.</p>
+
+<h3>Example: Query Parameter Casting</h3>
+
+<p>Endpoint: <code>/bookmarks?page=2&amp;limit=20</code></p>
+<ul>
+  <li>Requirement: <code>page</code> must be a <strong>number</strong>, greater than 0 and less than 500. <code>limit</code> must be a <strong>number</strong>, greater than 0 and less than 10,000.</li>
+  <li><strong>Problem:</strong> query parameters always arrive as <strong>strings</strong> by default — regardless of what they "look like." So <code>page=2</code> arrives as the string <code>"2"</code>, not the number <code>2</code>.</li>
+  <li>If validation runs directly on this raw string against a "must be a number" rule, it would <strong>fail incorrectly</strong> — even though the client did nothing wrong. This is the server's responsibility to fix.</li>
+  <li><strong>Solution:</strong> the server/service must <strong>cast</strong> (transform) the string into a number <em>before</em> running the numeric validation rules.</li>
+</ul>
+
+<blockquote><strong>Cast</strong> = forcing one data type to convert into another (e.g., string <code>"20"</code> → number <code>20</code>).</blockquote>
+
+<p>Validation and transformation are usually paired into a <strong>single pipeline</strong> so all input-handling logic (format expectations + data massaging) lives in one place, rather than scattered across the codebase.</p>
+
+<h3>Example: Server-Side Normalization</h3>
+
+<p>Sending an email with mixed casing (e.g. <code>Test@Example.COM</code>), a phone number without a leading <code>+</code>, and a date in one format:</p>
+<ul>
+  <li>The server transforms the email to <strong>all lowercase</strong> before using it.</li>
+  <li>The server prepends a <code>+</code> to the phone number.</li>
+  <li>The date gets reformatted into the server's expected structure.</li>
+</ul>
+<p>This is transformation happening as part of the same pipeline — normalizing client input into a canonical format the service layer expects, regardless of exactly how the client sent it.</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Raw client input<br/>e.g. Test@Example.COM"] --> B["Transformation<br/>(cast / normalize)"]
+    B --> C["Validation<br/>(structure, semantics, type)"]
+    C -->|Valid| D["Controller proceeds to Service Layer"]
+    C -->|Invalid| E["400 Bad Request"]
+</pre>
+
+<h2>6. Frontend Validation vs Backend Validation</h2>
+
+<p>A common mistake: assuming frontend (client-side) validation can replace backend (server-side) validation.</p>
+
+<table>
+<tr><th></th><th>Frontend Validation</th><th>Backend Validation</th></tr>
+<tr><td><strong>Purpose</strong></td><td>User Experience (UX) — immediate feedback</td><td>Security &amp; Data Integrity — mandatory</td></tr>
+<tr><td><strong>Can it be bypassed?</strong></td><td>Yes — easily, e.g. via API clients like Postman/Insomnia that skip the UI entirely</td><td>No — it's the last line of defense before data touches business logic/DB</td></tr>
+<tr><td><strong>Is it required?</strong></td><td>Nice to have, improves UX</td><td>Always required, regardless of what client is used</td></tr>
+</table>
+
+<blockquote>Any server can be hit by multiple kinds of clients — a polished web app with rich frontend validation, or a raw API client like Postman/Insomnia with <strong>no</strong> frontend validation at all. If backend security/integrity depends on frontend validation having run, the system breaks the moment a different (or malicious) client is used.</blockquote>
+
+<p><strong>Rule of thumb:</strong> Design server-side validation to be as strict and specific as necessary, completely independent of whatever the frontend does or doesn't do. Frontend and backend validation work <em>together</em> — frontend for UX, backend for correctness and security — but backend validation must never be skipped or treated as optional.</p>
+
+<h2>7. Key Interview Takeaways</h2>
+
+<ul>
+  <li>Validation and transformation happen at the <strong>entry point</strong> — after route matching, before any business logic in the controller/service/repository layers runs.</li>
+  <li><strong>Why validate early:</strong> prevents unexpected/invalid data from propagating deep into the system (e.g., causing a raw DB-level type error and an unhelpful <strong>500</strong>), and instead returns a clear, actionable <strong>400 Bad Request</strong>.</li>
+  <li><strong>Three types of validation:</strong>
+    <ul>
+      <li><strong>Syntactic</strong> — correct structure/pattern (email, phone, date formats).</li>
+      <li><strong>Semantic</strong> — data makes logical sense (DOB not in future, realistic age range).</li>
+      <li><strong>Type</strong> — correct data type (string/number/boolean/array/object).</li>
+    </ul>
+  </li>
+  <li>Validation pipelines can also express <strong>cross-field / conditional rules</strong> (e.g., password confirmation must match; a field becomes required only if another field has a specific value).</li>
+  <li><strong>Transformation</strong> = casting/normalizing data into the format the service layer expects (e.g., query params are always strings and must be cast to numbers/booleans before numeric/boolean validation can run correctly).</li>
+  <li>Validation and transformation are typically combined into a <strong>single pipeline</strong>, keeping all input-handling rules centralized rather than scattered.</li>
+  <li><strong>Frontend validation ≠ backend validation.</strong> Frontend validation is for UX (immediate feedback); backend validation is mandatory for security and data integrity, since frontend checks can always be bypassed (e.g., via direct API calls with tools like Postman/Insomnia).</li>
+</ul>
+
+<h2>8. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>Where in the request lifecycle should input validation happen, and why?</li>
+  <li>What's the difference between syntactic, semantic, and type validation? Give an example of each.</li>
+  <li>Why are query parameters always strings, and what problem does that create for validation? How do you solve it?</li>
+  <li>What's the difference between validation and transformation?</li>
+  <li>Why is it a bad idea to rely solely on database-level constraints to catch invalid input?</li>
+  <li>Why should frontend validation never replace backend validation?</li>
+  <li>How would you design a validation rule where one field's requirement depends on another field's value (e.g., "partner" required only if "married" is true)?</li>
+  <li>What status code should a validation failure return, and why (400 vs 500)?</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="https://claude.ai/artifact/YbnogsARDceVRTWrAVqetp">← Authentication &amp; Authorization</a>
+  <a href="https://claude.ai/artifact/LFVNr8SeVpxhHspJu78Wef">Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>

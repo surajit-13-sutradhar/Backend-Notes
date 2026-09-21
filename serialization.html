@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Serialization & Deserialization — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="index.html">← Chapters</a>
+  <a href="authentication.html">Next: Authentication &amp; Authorization →</a>
+</nav>
+
+<h1>Serialization &amp; Deserialization — Interview Notes</h1>
+
+<h2>1. The Core Problem</h2>
+
+<p>A <strong>client</strong> (e.g., a JavaScript app — React/Angular/Vue) and a <strong>server</strong> (e.g., a Rust app) communicate over a network (HTTP, gRPC, WebSocket, etc.). This series focuses on <strong>HTTP / REST</strong>, since it's still the most common client-server communication style.</p>
+
+<p><strong>The problem:</strong> JavaScript and Rust have completely different data types.</p>
+<ul>
+  <li>JavaScript → dynamic, interpreted</li>
+  <li>Rust → strictly typed, compiled</li>
+</ul>
+
+<p>So how does an object created in JS reach a Rust server and get parsed correctly, and vice versa?</p>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart LR
+    A["Client (Browser)<br/>JavaScript App"] -- "HTTP Request<br/>(Body: JSON)" --> B["Server<br/>(Rust / any language)"]
+    B -- "HTTP Response<br/>(Body: JSON)" --> A
+</pre>
+
+<p><strong>The solution:</strong> Both sides agree on a <strong>common standard/format</strong> for exchanging data.</p>
+<ul>
+  <li>Client: converts its native data (JS object) → common format → sends over network</li>
+  <li>Server: receives common format → converts into its native data (Rust struct) → does business logic</li>
+  <li>Server: converts response data → common format → sends back</li>
+  <li>Client: receives common format → converts back into JS object → renders UI</li>
+</ul>
+
+<h2>2. Definition</h2>
+
+<blockquote>
+<strong>Serialization</strong> = converting data <em>from</em> a native/language-specific format <em>into</em> a common, transmittable/storable format.<br>
+<strong>Deserialization</strong> = converting data <em>from</em> that common format back <em>into</em> a native/language-specific format.
+</blockquote>
+
+<p>Purpose: make data <strong>language-agnostic</strong> and <strong>domain-agnostic</strong>, so systems built in different languages/environments can understand each other — used both for:</p>
+<ul>
+  <li><strong>Transmission</strong> (client ↔ server over network)</li>
+  <li><strong>Storage</strong> (e.g., config files, logs, databases)</li>
+</ul>
+
+<h2>3. Where This Fits (OSI Model — high level only)</h2>
+
+<ul>
+  <li>Not necessary to master the OSI model in depth for backend engineering, but good to know it exists.</li>
+  <li>Data goes: <strong>Application Layer → ... → Physical Layer</strong> (eventually becomes bits: 0s and 1s transmitted as electrical/optical signals) and back up the stack on the receiving end.</li>
+  <li><strong>Mental model for a backend engineer:</strong>
+    <ul>
+      <li>At the <strong>application layer</strong>, your data is in a serialized format (e.g., JSON).</li>
+      <li>Everything below that (data frames, IP packets, bits) is <strong>not your concern</strong> — it's handled by lower OSI layers/network stack.</li>
+      <li>On the receiving end, before the server application code touches it, the data is <strong>reassembled back into JSON</strong>.</li>
+    </ul>
+  </li>
+</ul>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    subgraph ClientSide["Client Side"]
+        C1["Application Layer: JSON"] --> C2["... lower layers ..."] --> C3["Physical Layer: bits 0/1"]
+    end
+    C3 -->|network transmission| S3
+    subgraph ServerSide["Server Side"]
+        S3["Physical Layer: bits 0/1"] --> S2["... lower layers ..."] --> S1["Application Layer: JSON"]
+    end
+</pre>
+
+<h2>4. Types of Serialization Standards</h2>
+
+<table>
+<tr><th>Category</th><th>Formats</th><th>Notes</th></tr>
+<tr><td><strong>Text-based</strong></td><td>JSON, XML, YAML</td><td>Human-readable</td></tr>
+<tr><td><strong>Binary</strong></td><td>Protobuf (Protocol Buffers), Avro, etc.</td><td>Not human-readable, more compact/efficient</td></tr>
+</table>
+
+<ul>
+  <li><strong>JSON</strong> is used ~80% of the time for client-server (HTTP/REST) communication — the focus of this note.</li>
+  <li>XML/YAML are text-based too but less common for REST APIs (more common in configs).</li>
+  <li>Binary formats (Protobuf, Avro) are common in RPC systems like gRPC, not typically raw HTTP/REST.</li>
+</ul>
+
+<h2>5. JSON (JavaScript Object Notation)</h2>
+
+<ul>
+  <li>Name comes from its resemblance to a JS object literal, but <strong>it's language-independent</strong> — used everywhere:
+    <ul>
+      <li>REST API request/response bodies</li>
+      <li>Configuration files</li>
+      <li>Log files (structured logging)</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Rules of JSON syntax</h3>
+<ol>
+  <li>Enclosed in <code>{ }</code> (opening and closing braces).</li>
+  <li><strong>Keys must be strings, wrapped in double quotes</strong> (<code>"key"</code>) — no other data type allowed as a key.</li>
+  <li><strong>Values</strong> can be:
+    <ul>
+      <li>String</li>
+      <li>Number</li>
+      <li>Boolean</li>
+      <li>Array</li>
+      <li>Object (nested — follows the same rules recursively)</li>
+      <li><code>null</code></li>
+    </ul>
+  </li>
+</ol>
+
+<h3>Example</h3>
+
+<pre><code>{
+  "name": "John",
+  "age": 30,
+  "isActive": true,
+  "address": {
+    "country": "India",
+    "phoneNumber": 3456
+  },
+  "tags": ["admin", "user"]
+}</code></pre>
+
+<p>Note: nested objects (<code>address</code>) follow the exact same rules — keys as quoted strings, values of any valid JSON type.</p>
+
+<h2>6. End-to-End Flow (Demo Recap)</h2>
+
+<p>Example: <code>POST /api/books</code></p>
+
+<p><strong>Request body (client → server), serialized as JSON:</strong></p>
+<pre><code>{
+  "id": 1,
+  "title": "Some Book Title",
+  "author": "Some Author"
+}</code></pre>
+
+<p><strong>Flow:</strong></p>
+<ol>
+  <li>Client (JS) constructs a JS object.</li>
+  <li>Client <strong>serializes</strong> it into a JSON string and sends it in the HTTP request body.</li>
+  <li>Server (e.g., Rust) receives raw bytes → reconstructed into JSON at the application layer → <strong>deserializes</strong> JSON into its native type (e.g., a Rust <code>struct</code>).</li>
+  <li>Server performs business logic (e.g., saves book, assigns ID).</li>
+  <li>Server <strong>serializes</strong> its response data (e.g., a struct or list of structs) back into JSON.</li>
+</ol>
+
+<p><strong>Response body (server → client):</strong></p>
+<pre><code>{
+  "books": [
+    { "id": 1, "title": "Some Book Title", "author": "Some Author" }
+  ]
+}</code></pre>
+
+<ol start="6">
+  <li>Client receives JSON → <strong>deserializes</strong> into a JS object/array → uses it to render UI.</li>
+</ol>
+
+<h2>7. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>Serialization/Deserialization = converting data to/from a common format</strong> so that systems in different languages/environments can exchange and understand data — used for both <strong>network transmission</strong> and <strong>storage</strong>.</li>
+  <li>It solves the fundamental problem: <em>different languages have different type systems</em> (e.g., JS dynamic types vs. Rust's strict compiled types).</li>
+  <li><strong>JSON</strong> is the dominant serialization format for REST/HTTP APIs (~80% usage) due to being simple, human-readable, and lightweight.</li>
+  <li>Two broad categories of serialization standards:
+    <ul>
+      <li><strong>Text-based:</strong> JSON, XML, YAML</li>
+      <li><strong>Binary:</strong> Protobuf, Avro (used in gRPC and other RPC-style/high-performance systems)</li>
+    </ul>
+  </li>
+  <li>As a backend engineer, you don't need to worry about the lower OSI layers (packets, frames, bits) — your responsibility starts and ends at the <strong>application layer</strong>, where data exists as JSON (or whatever the agreed format is).</li>
+  <li>JSON structural rules:
+    <ul>
+      <li>Keys → always double-quoted strings</li>
+      <li>Values → string, number, boolean, array, object (nested), or null</li>
+    </ul>
+  </li>
+  <li>The concept itself is simple — the "trick" is recognizing serialization/deserialization as the <strong>general pattern</strong> underlying all cross-language/cross-system data exchange, not just something JSON-specific.</li>
+</ul>
+
+<h2>8. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What is serialization and deserialization, and why is it needed?</li>
+  <li>Why is JSON so widely used for REST APIs compared to XML or YAML?</li>
+  <li>What's the difference between text-based and binary serialization formats? When would you choose one over the other?</li>
+  <li>How does a strongly-typed language like Rust/Java handle deserializing loosely-typed JSON data?</li>
+  <li>Where does serialization fit into the OSI model / network stack?</li>
+  <li>What are some drawbacks of JSON (e.g., no native date type, larger payload size vs. binary formats like Protobuf)?</li>
+  <li>Name some binary serialization formats and where they're typically used (e.g., Protobuf with gRPC).</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="https://claude.ai/artifact/LFVNr8SeVpxhHspJu78Wef">← Chapters</a>
+  <a href="https://claude.ai/artifact/YbnogsARDceVRTWrAVqetp">Next: Authentication &amp; Authorization →</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>
