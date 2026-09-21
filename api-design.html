@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>REST API Design — Interview Notes</title>
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  * { box-sizing: border-box; }
+  body {
+    background: #121212;
+    color: #e0e0e0;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px 20px;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  h1, h2, h3 {
+    color: #ffffff;
+    font-weight: bold;
+    font-family: Georgia, 'Times New Roman', Times, serif;
+  }
+  h1 { font-size: 28px; border-bottom: 1px solid #444; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 21px; margin-top: 42px; border-bottom: 1px solid #2c2c2c; padding-bottom: 6px; }
+  h3 { font-size: 18px; margin-top: 28px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0; padding-left: 28px; }
+  li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #444; padding: 6px 12px; text-align: left; vertical-align: top; }
+  th { background: #1a1a1a; }
+  code {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    padding: 1px 5px;
+    border: 1px solid #2c2c2c;
+  }
+  pre {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    padding: 14px;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid #555;
+    margin: 16px 0;
+    padding: 2px 14px;
+    color: #bbbbbb;
+  }
+  hr { border: none; border-top: 1px solid #333; margin: 36px 0; }
+  nav {
+    margin-bottom: 30px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #333;
+  }
+  nav a {
+    color: #9ecbff;
+    text-decoration: none;
+    margin-right: 20px;
+    font-family: Arial, sans-serif;
+    font-size: 15px;
+  }
+  nav a:hover { text-decoration: underline; }
+  .pre-wrap { overflow-x: auto; }
+  .table-wrap { overflow-x: auto; }
+  .mermaid { background: #1a1a1a; border: 1px solid #333; padding: 10px; overflow-x: auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<h1>REST API Design — Interview Notes</h1>
+
+<h2>1. Why API Design Matters</h2>
+
+<p>API design is one of the most important skills for a backend engineer. This chapter focuses on <strong>REST APIs</strong> (other styles exist, e.g., RPC and GraphQL, but REST is the most widely used standard).</p>
+
+<p>Even experienced developers keep getting confused by the same questions:</p>
+<ul>
+  <li>Should the URI path segment be plural or singular?</li>
+  <li><code>PATCH</code> or <code>PUT</code> when updating a resource?</li>
+  <li>Which method for a <strong>custom action</strong> (not fetch/create/update/delete)?</li>
+  <li>Which HTTP status code for which scenario?</li>
+</ul>
+
+<p><strong>Why the confusion exists:</strong> the web standards were written when the web looked very different — mostly <strong>multi-page applications (MPAs)</strong>. Today most front ends are <strong>single-page applications (SPAs)</strong>: the browser downloads all the JavaScript on the first request and does routing on the client side.</p>
+
+<p><strong>Goal of the chapter:</strong> not to invent new standards, but to extract a consistent set of rules from the existing ones, so you can stop debating "is this RESTful?" and focus on business logic.</p>
+
+<h2>2. History — Where REST Comes From</h2>
+
+<h3>Tim Berners-Lee and the World Wide Web (1990)</h3>
+<p>Started to share knowledge globally. Within about a year he invented:</p>
+<ol>
+  <li><strong>URI</strong> — Uniform Resource Identifier</li>
+  <li><strong>HTTP</strong> — protocol for client–server communication</li>
+  <li><strong>HTML</strong> — markup language; the "skeleton" of a page</li>
+  <li>The first <strong>web server</strong></li>
+  <li>The first <strong>web browser</strong></li>
+  <li>The first <strong>WYSIWYG HTML editor</strong> (built into the browser)</li>
+</ol>
+<p>We still use evolved versions of all of these (HTTP/1.1 → 2 → 3).</p>
+
+<p><strong>The problem:</strong> the web's user base grew exponentially and the original design had not accounted for that scale. It was heading towards breakdown.</p>
+
+<h3>Roy Fielding and the six REST constraints</h3>
+<p>Roy Fielding (co-founder of the Apache HTTP Server project) proposed constraints to make the web scalable. He later worked with Berners-Lee on the specification of <strong>HTTP/1.1</strong>, and in <strong>2000</strong> described the web's architectural style in his PhD dissertation, naming it <strong>REST — Representational State Transfer</strong>. (Reading that dissertation is recommended for backend engineers.)</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>#</th><th>Constraint</th><th>Meaning</th></tr>
+<tr><td>1</td><td><strong>Client–Server</strong></td><td>Separation of concerns. Client handles UI/UX; server handles data storage and business logic (front end / back end). Each can evolve independently, which improves scalability.</td></tr>
+<tr><td>2</td><td><strong>Uniform Interface</strong></td><td>Standardized way for components to communicate. Has four sub-constraints: resource identification, resource manipulation through representations, self-descriptive messages, and hypermedia as the engine of application state (HATEOAS).</td></tr>
+<tr><td>3</td><td><strong>Layered System</strong></td><td>Architecture is made of hierarchical layers; each layer only sees the layer immediately below it. Allows load balancers, proxies, etc. to be added without affecting core functionality.</td></tr>
+<tr><td>4</td><td><strong>Cache</strong></td><td>Responses must be explicitly labeled cacheable or non-cacheable. Clients can cache, which reduces server load and improves response times.</td></tr>
+<tr><td>5</td><td><strong>Stateless</strong></td><td>Every request must carry all the information needed to process it; the server stores no client context between requests. Any server behind a load balancer (e.g., round robin) can handle any request.</td></tr>
+<tr><td>6</td><td><strong>Code on Demand</strong> (optional)</td><td>Server can temporarily extend client functionality by sending executable code (e.g., JavaScript). Optional and rarely emphasized.</td></tr>
+</table>
+</div>
+
+<h2>3. What "Representational State Transfer" Means</h2>
+
+<ul>
+  <li><strong>Representational</strong> — a resource (data/object) is exposed in a specific <em>representation</em>. The same resource can have different representations depending on the client: <strong>JSON</strong> (most popular, e.g., server-to-server), <strong>XML</strong>, or <strong>HTML</strong> (e.g., server-to-browser). Example: a <code>user</code> resource with <code>id</code>, <code>name</code>, <code>createdAt</code> can be sent as JSON to an API client or as an HTML page to a browser.</li>
+  <li><strong>State</strong> — the current condition/attributes of a resource. Example: a shopping cart's state = items, quantities, and total price.</li>
+  <li><strong>Transfer</strong> — the movement of resource representations between client and server using standard HTTP methods (<code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>, ...). Example: a <code>GET</code> for a web page transfers a representation from server to client.</li>
+</ul>
+
+<blockquote>
+<strong>REST</strong> = an architectural style where resources are represented in different formats, their state is transferred between client and server through those representations over HTTP, and the whole system follows the six constraints above to stay scalable.
+</blockquote>
+
+<h2>4. URL Anatomy and API Route Structure</h2>
+
+<h3>A typical website URL</h3>
+<pre><code>https://www.example.xyz/blog/post?tag=rest&amp;page=2#comments
+└──┬──┘ └──────┬──────┘└───┬───┘└────────┬───────┘└───┬───┘
+scheme    authority/domain  path     query params   fragment</code></pre>
+
+<ul>
+  <li><strong>Scheme</strong> — <code>http</code> or <code>https</code> (encrypted).</li>
+  <li><strong>Authority</strong> — the domain (may include a subdomain).</li>
+  <li><strong>Path</strong> — the resource being accessed. The <code>/</code> represents a <strong>hierarchical relationship</strong> between resources.</li>
+  <li><strong>Query parameters</strong> — key/value pairs, mostly used with <code>GET</code> for filters, pagination, etc.</li>
+  <li><strong>Fragment</strong> — makes the browser scroll to a section of the page.</li>
+</ul>
+
+<h3>A typical API URL (industry convention, not a hard rule)</h3>
+<pre><code>https://api.example.com/v1/books
+└──┬──┘ └──────┬──────┘└┬┘└──┬─┘
+scheme  API subdomain  version resource (plural)</code></pre>
+
+<ul>
+  <li>APIs usually live on an <code>api.</code> subdomain.</li>
+  <li>Versioning is usually done in the route: <code>/v1</code>, <code>/v2</code>, ...</li>
+</ul>
+
+<h3>Path segment rules</h3>
+<ol>
+  <li><strong>Resources are always plural nouns</strong> — even when fetching a single item: <code>GET /v1/books</code> (list) and <code>GET /v1/books/{id}</code> (single). Never <code>/book/{id}</code>.</li>
+  <li><strong>Lowercase only</strong> — URLs travel through different servers, clients, and operating systems; avoid case-mismatch problems.</li>
+  <li><strong>No spaces or underscores</strong> — use <strong>hyphens</strong> to separate words. Example slug: "Harry Potter" → <code>harry-potter</code> → <code>/books/harry-potter</code>.</li>
+  <li><strong>Slash = hierarchy</strong> — <code>/books</code> is the collection (level 1); <code>/books/{id}</code> is one item in that collection (level 2).</li>
+</ol>
+
+<h2>5. Idempotency and HTTP Methods</h2>
+
+<blockquote>
+<strong>Idempotent operation:</strong> performing the same action multiple times has the same <em>effect on the server</em> as performing it once. It does not matter whether you call it once or a thousand times — the side effect is the same.
+</blockquote>
+
+<p>Note: idempotency is about the <strong>side effect caused by the client's call</strong>, not about whether the response is always identical. A <code>GET /books</code> may return a different list later because someone else created a book, but your call caused no change, so it is still idempotent.</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>Method</th><th>Purpose</th><th>Idempotent?</th><th>Why</th></tr>
+<tr><td><code>GET</code></td><td>Retrieve data</td><td>Yes</td><td>Fetching causes no change on the server.</td></tr>
+<tr><td><code>PUT</code></td><td>Completely <strong>replace</strong> a resource with the client's payload (all fields sent)</td><td>Yes</td><td>Repeating the same payload leaves the resource in the same state.</td></tr>
+<tr><td><code>PATCH</code></td><td><strong>Partially</strong> update a resource (only the changed fields sent)</td><td>Yes</td><td>Setting <code>name</code> to <code>B</code> repeatedly leaves the name as <code>B</code>.</td></tr>
+<tr><td><code>DELETE</code></td><td>Delete a resource</td><td>Yes</td><td>The first call deletes it. Later calls return <code>404</code> but change nothing further.</td></tr>
+<tr><td><code>POST</code></td><td>Create a resource, or perform a custom action</td><td><strong>No</strong></td><td>Each call creates a new resource (new ID) — side effects differ per call.</td></tr>
+</table>
+</div>
+
+<ul>
+  <li><code>HEAD</code> (fetch headers only) and <code>OPTIONS</code> (e.g., used in CORS preflight to check whether an origin is allowed) also exist, but the five above cover almost all data operations.</li>
+  <li><strong><code>PUT</code> vs <code>PATCH</code>:</strong> people often use them interchangeably, which is tolerable for internal APIs. For public APIs, stick to the semantics so integrators aren't misled. In SPAs with JSON payloads you mostly update a few fields, so <strong><code>PATCH</code> is the common choice</strong>.</li>
+  <li><strong><code>POST</code> is open-ended:</strong> whenever an action does not fit fetch / create / update / delete, use <code>POST</code> — this is how <strong>custom actions</strong> are modeled (e.g., "send email").</li>
+</ul>
+
+<h2>6. The API Design Workflow</h2>
+
+<pre class="mermaid">
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    A["UI designs / wireframes (Figma)<br/>+ talk to product and client"] --> B["Identify resources<br/>(the nouns in the requirements)"]
+    B --> C["Design DB schema<br/>(next chapter)"]
+    C --> D["List the actions clients need<br/>(CRUD + custom actions)"]
+    D --> E["Design the API interface<br/>(Insomnia / Postman / Swagger)"]
+    E --> F["Only then: write code / business logic"]
+</pre>
+
+<ul>
+  <li><strong>Design the interface before writing any business logic.</strong> It should be intuitive, unambiguous, and follow REST standards.</li>
+  <li><strong>Why follow standards:</strong> without them, consumers can only learn your API's behavior by reading your code or by trial and error — lots of room for guesswork, bugs, and sync calls. If most behavior is predictable from the standard, integration effort drops a lot.</li>
+  <li><strong>Start from the UI design.</strong> Wireframes show how end users interact with data, linking users → front end → your API → database.</li>
+  <li><strong>Resources = nouns</strong> in the requirements (an oversimplified but useful rule of thumb).</li>
+</ul>
+
+<h3>Demo domain: a project-management platform (like Jira / Linear)</h3>
+<p>Nouns found: <strong>organizations, projects, users, tasks, tags</strong>. The demo uses three tables: <code>organization</code>, <code>project</code>, <code>task</code>. Fields such as <code>id</code>, <code>createdAt</code>, <code>updatedAt</code> are <strong>server-managed</strong> and are never accepted from the client payload.</p>
+
+<h2>7. CRUD Endpoints (Organization Example)</h2>
+
+<div class="table-wrap">
+<table>
+<tr><th>Action</th><th>Method &amp; route</th><th>Body</th><th>Success status</th></tr>
+<tr><td>List</td><td><code>GET /organizations</code></td><td>—</td><td><code>200</code></td></tr>
+<tr><td>Create</td><td><code>POST /organizations</code></td><td>JSON with <code>name</code>, <code>status</code>, <code>description</code></td><td><code>201 Created</code> + the new entity</td></tr>
+<tr><td>Get one</td><td><code>GET /organizations/{id}</code></td><td>—</td><td><code>200</code></td></tr>
+<tr><td>Update</td><td><code>PATCH /organizations/{id}</code></td><td>Only the fields to change</td><td><code>200</code> + updated entity</td></tr>
+<tr><td>Delete</td><td><code>DELETE /organizations/{id}</code></td><td>—</td><td><code>204 No Content</code> (empty body)</td></tr>
+</table>
+</div>
+
+<ul>
+  <li>List and create share the <strong>same URL</strong>; the <strong>HTTP method</strong> tells the server which handler to call.</li>
+  <li>Get-one, update, and delete share the same URL shape (<code>/organizations/{id}</code>) for the same reason.</li>
+  <li>The <code>{id}</code> is a <strong>dynamic path parameter</strong> identifying a single resource.</li>
+</ul>
+
+<h3>Create (<code>POST</code>)</h3>
+<pre><code>POST /organizations
+{
+  "name": "org 1",
+  "status": "active",
+  "description": "some description"
+}
+
+→ 201 Created
+{
+  "id": "...",
+  "createdAt": "...",
+  "name": "org 1",
+  "status": "active",
+  "description": "some description"
+}</code></pre>
+
+<h3>Update (<code>PATCH</code>)</h3>
+<pre><code>PATCH /organizations/{id}
+{ "status": "active" }
+
+→ 200 OK  (returns the full updated organization)</code></pre>
+
+<h3>Delete</h3>
+<pre><code>DELETE /organizations/{id}
+
+→ 204 No Content  (nothing to send back — the resource no longer exists)</code></pre>
+
+<h3>Status codes for the CRUD flow</h3>
+<div class="table-wrap">
+<table>
+<tr><th>Code</th><th>When</th></tr>
+<tr><td><code>200 OK</code></td><td>Successful fetch, update, or other successful operation that did not create a resource.</td></tr>
+<tr><td><code>201 Created</code></td><td>A new resource was created. Return the new entity in the body.</td></tr>
+<tr><td><code>204 No Content</code></td><td>Successful, but there is no body to return (typical for <code>DELETE</code>).</td></tr>
+<tr><td><code>404 Not Found</code></td><td>The client requested a <strong>specific</strong> resource (by ID) that doesn't exist, e.g., <code>GET</code> a deleted organization.</td></tr>
+</table>
+</div>
+
+<blockquote>
+<strong>Rule of thumb:</strong> for a <em>list</em> API with no matching data, return <code>200</code> with an empty array (<code>"data": []</code>, <code>"total": 0</code>), <strong>not</strong> <code>404</code>. Use <code>404</code> only when a specific resource was requested and doesn't exist.
+</blockquote>
+
+<h2>8. List APIs — Pagination, Sorting, Filtering</h2>
+
+<p>All controlled via <strong>query parameters</strong> (a <code>GET</code> has no body).</p>
+
+<h3>Pagination</h3>
+<p><strong>Why:</strong> returning all records is expensive. Serializing thousands of records is resource-heavy and adds server delay, and the user perceives that delay in the UI even though they only see 10–20 items at first. Return one portion (page) at a time.</p>
+
+<ul>
+  <li><code>limit</code> — number of items per page (default e.g. <code>10</code> or <code>20</code>).</li>
+  <li><code>page</code> — which page to return (default <code>1</code>).</li>
+</ul>
+
+<p><strong>Response shape:</strong></p>
+<pre><code>{
+  "data": [ ... ],
+  "total": 5,
+  "page": 1,
+  "totalPages": 3
+}</code></pre>
+
+<ul>
+  <li><code>data</code> — the items for this page.</li>
+  <li><code>total</code> — total count in the database, independent of the current page (useful for UI like "10 of 50").</li>
+  <li><code>page</code> — the current page number.</li>
+  <li><code>totalPages</code> — how many pages exist. Front ends can use it to stop infinite scroll when <code>page == totalPages</code>.</li>
+</ul>
+
+<p><strong>Worked example:</strong> 5 organizations with <code>limit=2</code> gives <code>totalPages = 3</code>: page 1 has 2 items, page 2 has 2 items, page 3 has 1 item.</p>
+<pre><code>GET /organizations?limit=2&amp;page=1   → org 5, org 4
+GET /organizations?limit=2&amp;page=2   → org 3, org 2
+GET /organizations?limit=2&amp;page=3   → org 1</code></pre>
+
+<h3>Sorting</h3>
+<ul>
+  <li><code>sortBy</code> — the field to sort by (e.g., <code>name</code>, <code>status</code>).</li>
+  <li><code>sortOrder</code> — <code>asc</code> or <code>desc</code>.</li>
+  <li><strong>Always have a default sort.</strong> Without an explicit sort, databases don't guarantee order, so results could differ between calls. Default: <code>createdAt</code>, <strong>descending</strong> (latest first). If the client sends <code>sortBy</code> but no <code>sortOrder</code>, default the order to descending.</li>
+</ul>
+<pre><code>GET /organizations?sortBy=name&amp;sortOrder=asc</code></pre>
+
+<h3>Filtering</h3>
+<p>Accept field names as query parameters and return only matching records; multiple filters can be combined.</p>
+<pre><code>GET /organizations?status=archived
+GET /organizations?status=active&amp;name=org 1</code></pre>
+
+<h3>Sensible defaults</h3>
+<p>None of these parameters should be required. A bare <code>GET /organizations</code> must work: <code>page=1</code>, a default <code>limit</code>, and a default sort of <code>createdAt desc</code>.</p>
+
+<h2>9. Custom Actions</h2>
+
+<p>A <strong>custom action</strong> is an operation that doesn't fit create / read / update / delete. Model it with <code>POST</code> and put the <strong>action name at the end of the path</strong>:</p>
+
+<pre><code>POST /organizations/{id}/archive
+POST /projects/{id}/clone</code></pre>
+
+<ul>
+  <li>The path still reads as a hierarchy: <em>collection → specific item → action on it</em>.</li>
+  <li><strong>Why not just <code>PATCH status=archived</code>?</strong> Archiving triggers server-side work (e.g., handling the organization's projects and tasks, notifying users by email). Setting a field isn't the same as performing the action.</li>
+  <li><strong>Why not simulate "clone" with a client-side create?</strong> The client doesn't know what cloning means on the server (clone tasks too? email the owner?). The server owns that logic, so expose an explicit action endpoint.</li>
+  <li><strong>Don't assume <code>POST</code> means <code>201</code>.</strong> <code>archive</code> returns <code>200</code> (nothing was created). <code>clone</code> returns <code>201</code> (a new project was created). Choose the status code from what actually happened.</li>
+  <li>Custom actions may accept an optional body (e.g., fields to override when cloning).</li>
+</ul>
+
+<h2>10. Consistency Across Resources</h2>
+
+<p>The same patterns repeat for every resource (organizations, projects, tasks): list, create, get one, update, delete, and custom actions. Once you know the pattern, you can design any number of APIs with it.</p>
+
+<ul>
+  <li><strong>JSON keys use camelCase</strong> — for both request payloads and responses (<code>createdAt</code>, <code>organizationId</code>).</li>
+  <li><strong>Use the same field name for the same concept</strong> across all endpoints. If organizations use <code>description</code>, projects must use <code>description</code>, not <code>desc</code>.</li>
+  <li><strong>Use the same route style everywhere.</strong> If <code>/organizations</code> is plural, <code>/projects</code> must be too.</li>
+  <li><strong>Why:</strong> a front-end engineer integrates one endpoint and then assumes the rest behave the same way. Breaking those assumptions wastes their time and forces them back into the docs.</li>
+  <li>Even if you don't follow the global REST conventions, <strong>pick a style and be consistent</strong>.</li>
+</ul>
+
+<h2>11. Best Practices Checklist</h2>
+
+<ol>
+  <li><strong>Provide interactive documentation</strong> — OpenAPI / Swagger (a playground for testing and a living spec). Plan it from the start and keep it updated.</li>
+  <li><strong>Be intuitive and consistent</strong> — routes, dynamic parameters, custom actions, payloads, naming, and data formats.</li>
+  <li><strong>Provide sane defaults</strong>
+    <ul>
+      <li>Lists: default <code>page</code>, <code>limit</code>, <code>sortBy</code> (<code>createdAt</code>), <code>sortOrder</code> (<code>desc</code>).</li>
+      <li>Creates: require only what is absolutely needed. E.g., if <code>status</code> is omitted when creating an organization, default it to <code>active</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Avoid abbreviations</strong> (<code>desc</code> for <code>description</code>) — integrators don't have your context.</li>
+  <li><strong>Design the interface in a separate session, before coding</strong> — using Swagger, Insomnia, or Postman, independent of programming language or framework.</li>
+</ol>
+
+<h2>12. Key Interview Takeaways</h2>
+
+<ul>
+  <li><strong>REST</strong> (Representational State Transfer) is an architectural style from Roy Fielding's 2000 dissertation, built to make the web scalable. Its six constraints are <strong>client–server, uniform interface, layered system, cache, stateless, and code on demand (optional)</strong>.</li>
+  <li><strong>Representation</strong> = the format of a resource (JSON/XML/HTML); <strong>state</strong> = the resource's current data; <strong>transfer</strong> = moving representations between client and server via HTTP methods.</li>
+  <li><strong>Path rules:</strong> plural nouns, lowercase, hyphens (no spaces/underscores), <code>/</code> means hierarchy, version in the route (<code>/v1</code>), commonly on an <code>api.</code> subdomain.</li>
+  <li><strong>Idempotent methods:</strong> <code>GET</code>, <code>PUT</code>, <code>PATCH</code>, <code>DELETE</code>. <strong>Non-idempotent:</strong> <code>POST</code>.</li>
+  <li><strong><code>PUT</code> replaces the whole resource; <code>PATCH</code> updates part of it.</strong> Prefer <code>PATCH</code> for partial updates.</li>
+  <li><strong><code>POST</code></strong> = create, or any <strong>custom action</strong> that doesn't fit the CRUD methods (<code>POST /resources/{id}/action</code>).</li>
+  <li><strong>Status codes:</strong> <code>201</code> for created, <code>200</code> for other successes, <code>204</code> for successful delete (empty body), <code>404</code> for a missing <em>specific</em> resource.</li>
+  <li><strong>Empty list ≠ 404.</strong> Return <code>200</code> with an empty array.</li>
+  <li><strong>List endpoints</strong> should support <strong>pagination</strong> (<code>page</code>, <code>limit</code>, response with <code>total</code> / <code>totalPages</code>), <strong>sorting</strong> (<code>sortBy</code>, <code>sortOrder</code>), and <strong>filtering</strong> — all with server-side defaults.</li>
+  <li>JSON fields use <strong>camelCase</strong>, and naming must be <strong>consistent</strong> across every endpoint and resource.</li>
+  <li><strong>Design first, code later:</strong> start from the wireframes → resources (nouns) → schema → actions → interface, and document with Swagger / OpenAPI.</li>
+</ul>
+
+<h2>13. Possible Interview Questions to Prepare For</h2>
+
+<ol>
+  <li>What is REST? What do "Representational", "State", and "Transfer" each mean?</li>
+  <li>What are the six REST constraints? Explain statelessness and why it helps horizontal scaling.</li>
+  <li>Why should resource names in URLs be plural? What should a URL for a single resource look like?</li>
+  <li>What does <code>/</code> mean in a REST path? How would you design a slug for a multi-word title?</li>
+  <li>What is idempotency? Which HTTP methods are idempotent, and why is <code>POST</code> not?</li>
+  <li>Is <code>DELETE</code> idempotent even though the second call returns <code>404</code>?</li>
+  <li>What's the difference between <code>PUT</code> and <code>PATCH</code>? When would you use each?</li>
+  <li>How would you model an action like "archive an organization" or "send an email" in REST?</li>
+  <li>When do you return <code>200</code> vs <code>201</code> vs <code>204</code>? Can a <code>POST</code> return <code>200</code>?</li>
+  <li>When should an API return <code>404</code>? What should a list endpoint return when nothing matches?</li>
+  <li>How do you implement pagination, sorting, and filtering in a list API? Why is a default sort necessary?</li>
+  <li>What does a paginated response usually contain, and how does the client use it?</li>
+  <li>Why should APIs use sensible defaults and consistent naming (camelCase, same field names across resources)?</li>
+  <li>How do you version an API? Where does the version go?</li>
+  <li>Walk through how you'd approach designing the API for a new product before writing any code.</li>
+</ol>
+
+<hr>
+<nav>
+  <a href="index.html">← Chapters</a>
+</nav>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+</body>
+</html>
